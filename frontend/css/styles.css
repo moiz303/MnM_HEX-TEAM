@@ -1139,6 +1139,23 @@ body {
     align-items: center;
 }
 
+/* Upload progress bar inside file preview */
+.file-progress {
+  width: 120px;
+  height: 8px;
+  background: rgba(var(--color-slate-500-rgb, 98,108,113), 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-left: var(--space-8);
+}
+
+.file-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-hover));
+  transition: width 160ms linear;
+}
+
 .message-input-wrapper {
     padding: var(--space-16) var(--space-24);
     background: var(--color-surface);

@@ -31,7 +31,7 @@ const randomResponses = [
 
 let activePeer = null;
 let messages = {};
-let selectedFiles = [];
+let selectedFiles = []; // array of {file, uid}
 let callTimer = null;
 let callSeconds = 0;
 let localStream = null;
@@ -229,12 +229,11 @@ function sendMessage() {
     }
 
     if (selectedFiles.length > 0) {
-        selectedFiles.forEach(file => {
-            messages[activePeer.username].push({ text: `📎 ${file.name}`, time, sent: true });
+        // append placeholders to message list
+        selectedFiles.forEach(item => {
+            messages[activePeer.username].push({ text: `📎 ${item.file.name}`, time, sent: true });
         });
-        selectedFiles = [];
-        filePreview.classList.add('hidden');
-        filePreview.innerHTML = '';
+        // do not clear preview yet — we'll upload and then clear
     }
 
     messageInput.value = '';
@@ -249,6 +248,42 @@ function sendMessage() {
         }).catch(() => {
             // ignore send errors for now
         });
+    }
+
+    // If there are files, upload them in chunks and send link
+    if (selectedFiles.length > 0) {
+        (async () => {
+            for (const item of selectedFiles.slice()) {
+                const file = item.file;
+                const uid = item.uid;
+                try {
+                    const res = await uploadFileInChunks(file, activePeer.username, (p) => {
+                        // update progress bar in UI
+                        const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
+                        if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+                    });
+
+                    if (res && res.file_url) {
+                        // send message with file link
+                        const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                        fetch('/api/send_message', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                        }).catch(() => {});
+                    }
+                } catch (err) {
+                    console.error('Upload failed', err);
+                    const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
+                    if (bar) bar.style.background = 'linear-gradient(90deg, var(--color-error), var(--color-error))';
+                }
+            }
+
+            // after all uploads, clear selection and hide preview
+            selectedFiles = [];
+            filePreview.classList.add('hidden');
+            filePreview.innerHTML = '';
+        })();
     }
 
     // Simulate reply only if using mock backend
@@ -387,39 +422,95 @@ attachBtn.addEventListener('click', () => {
 });
 
 fileInput.addEventListener('change', (e) => {
-    const files = Array.from(e.target.files);
+    const files = Array.from(e.target.files).map(f => ({ file: f, uid: `${Date.now()}_${Math.floor(Math.random()*1000000)}` }));
     selectedFiles = [...selectedFiles, ...files];
-    
+
     if (selectedFiles.length > 0) {
         filePreview.classList.remove('hidden');
-        filePreview.innerHTML = selectedFiles.map((file, index) => `
-            <div class="file-item">
+        filePreview.innerHTML = selectedFiles.map((item) => `
+            <div class="file-item" data-uid="${item.uid}">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                     <path d="M13 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V9L13 2Z" stroke="currentColor" stroke-width="2"/>
                     <path d="M13 2V9H20" stroke="currentColor" stroke-width="2"/>
                 </svg>
-                <span>${file.name}</span>
-                <button class="file-remove" data-index="${index}">✕</button>
+                <span>${item.file.name}</span>
+                <div class="file-progress"><div class="file-progress-bar" style="width:0%"></div></div>
+                <button class="file-remove" data-uid="${item.uid}">✕</button>
             </div>
         `).join('');
-        
+
+        // remove handlers
         document.querySelectorAll('.file-remove').forEach(btn => {
             btn.addEventListener('click', () => {
-                const index = parseInt(btn.dataset.index);
-                selectedFiles.splice(index, 1);
-                
+                const uid = btn.dataset.uid;
+                const idx = selectedFiles.findIndex(s => s.uid === uid);
+                if (idx !== -1) selectedFiles.splice(idx, 1);
+
                 if (selectedFiles.length === 0) {
                     filePreview.classList.add('hidden');
                     filePreview.innerHTML = '';
                 } else {
+                    // re-render
                     fileInput.dispatchEvent(new Event('change'));
                 }
             });
         });
     }
-    
+
     fileInput.value = '';
 });
+
+/**
+ * Upload a file in chunks to the backend.
+ * Calls /api/upload/init -> /api/upload/chunk -> /api/upload/complete
+ * Returns {file_url, filename} on success.
+ */
+async function uploadFileInChunks(file, peerUsername, onProgress) {
+    const MAX_SIZE = 200 * 1024 * 1024; // 200MB
+    if (file.size > MAX_SIZE) throw new Error('File exceeds 200MB limit');
+
+    // Init upload
+    const initRes = await fetch('/api/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, size: file.size })
+    });
+    if (!initRes.ok) throw new Error('Failed to init upload');
+    const initData = await initRes.json();
+    const uploadId = initData.upload_id;
+
+    const CHUNK_SIZE = 512 * 1024; // 512 KB
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const blob = file.slice(start, end);
+
+        const form = new FormData();
+        form.append('upload_id', uploadId);
+        form.append('index', String(i));
+        form.append('chunk', blob, file.name);
+
+        const chunkRes = await fetch('/api/upload/chunk', {
+            method: 'POST',
+            body: form
+        });
+        if (!chunkRes.ok) throw new Error('Chunk upload failed');
+
+        if (onProgress) onProgress((i + 1) / totalChunks);
+    }
+
+    // Complete
+    const completeRes = await fetch('/api/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id: uploadId })
+    });
+    if (!completeRes.ok) throw new Error('Upload complete failed');
+    const completeData = await completeRes.json();
+    return completeData;
+}
 
 sendBtn.addEventListener('click', sendMessage);
 messageInput.addEventListener('keypress', (e) => {
