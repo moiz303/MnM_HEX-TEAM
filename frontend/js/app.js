@@ -67,6 +67,28 @@ function getInitials(ip) {
     return parts[parts.length - 1];
 }
 
+function isImageUrl(url) {
+    return /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(url);
+}
+
+function saveMessagesToStorage(username) {
+    try {
+        localStorage.setItem(`chat_${username}`, JSON.stringify(messages[username] || []));
+    } catch (e) {
+        // ignore storage errors
+    }
+}
+
+function loadMessagesFromStorage(username) {
+    try {
+        const raw = localStorage.getItem(`chat_${username}`);
+        if (raw) {
+            return JSON.parse(raw);
+        }
+    } catch (e) {}
+    return null;
+}
+
 async function fetchPeersPolling() {
     try {
         const res = await fetch('/api/peers');
@@ -137,6 +159,13 @@ async function selectPeerByUsername(username) {
     // ensure messages bucket
     if (!messages[activePeer.username]) messages[activePeer.username] = [];
 
+    // try to load local cached messages first so UI works frontend-only
+    const local = loadMessagesFromStorage(activePeer.username);
+    if (local && Array.isArray(local) && local.length > 0) {
+        messages[activePeer.username] = local;
+        renderMessages();
+    }
+
     renderPeers(searchInput.value);
     updateHeader();
 
@@ -163,11 +192,16 @@ async function selectPeerByUsername(username) {
         if (r.ok) {
             const data = await r.json();
             // map messages to simple structure
-            messages[activePeer.username] = (data.messages || []).map(m => ({
+            const mapped = (data.messages || []).map(m => ({
                 text: m.text || '',
                 time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
                 sent: m.from === 'me'
             }));
+            // If backend provides only encrypted placeholders, keep local cache.
+            const hasReal = mapped.some(x => x.text && x.text !== '[encrypted]');
+            if (hasReal) {
+                messages[activePeer.username] = mapped.reverse();
+            }
         }
     } catch (e) {
         // fallback: keep existing messages
@@ -201,7 +235,22 @@ function renderMessages() {
                 </div>
             ` : ''}
             <div class="message-content">
-                <div class="message-bubble">${msg.text}</div>
+                <div class="message-bubble">${(() => {
+                    const text = msg.text || '';
+                    // find first URL-like token
+                    const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+)/);
+                    if (m) {
+                        const url = m[0];
+                        if (isImageUrl(url)) {
+                            return `<img src="${url}" class="msg-image" />`;
+                        }
+                        // fallback: show link and remaining text
+                        const rest = text.replace(url, '').trim();
+                        return `<a href="${url}" target="_blank">${url}</a>${rest ? ' ' + rest : ''}`;
+                    }
+                    // no url -> plain text (escape minimal)
+                    return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                })()}</div>
                 <span class="message-time">${msg.time}</span>
             </div>
             ${msg.sent ? `
@@ -213,6 +262,8 @@ function renderMessages() {
     `).join('');
 
     messagesArea.scrollTop = messagesArea.scrollHeight;
+    // save to localStorage for offline/frontend-only use
+    saveMessagesToStorage(activePeer.username);
 }
 
 function sendMessage() {

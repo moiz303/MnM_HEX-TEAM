@@ -754,6 +754,14 @@ body {
     height: 100vh;
 }
 
+/* Inline message images */
+.msg-image {
+  max-width: 320px;
+  max-height: 320px;
+  border-radius: 8px;
+  display: block;
+}
+
 .sidebar {
     width: 340px;
     background: var(--color-surface);
