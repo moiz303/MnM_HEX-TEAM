@@ -5,10 +5,10 @@
 import secrets
 import hashlib
 import hmac
-import json
 import struct
 import base64
 import time
+import json
 from typing import Dict, Tuple, Optional, Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -19,14 +19,13 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
 
 from .secure_memory import SecureMemory
-from .exceptions import CryptoError
+from .exceptions import CryptoError, InvalidSignatureError, ReplayAttackError
 
 
 class SessionKeys:
     """
     Ключи одной сессии чата с автоматическим затиранием
     """
-
     def __init__(self, encrypt_key: bytes, mac_key: bytes, peer_id: str):
         self.encrypt_key = SecureMemory(32)
         self.encrypt_key.write(encrypt_key)
@@ -58,24 +57,30 @@ class SecureCryptoCore:
         self._master_key.write(secrets.token_bytes(32))
 
         self.device_id = device_id
-        self._session_keys: Dict[str, SessionKeys] = {}
+        self._session_keys: Dict[str, SessionKeys] = {}  # локальный chat_id -> ключи
+
+        # Маппинг между локальными и удалёнными chat_id
+        self._local_to_remote: Dict[str, str] = {}  # локальный -> удалённый
+        self._remote_to_local: Dict[str, str] = {}  # удалённый -> локальный
+
         self._peer_identity_keys: Dict[str, Any] = {}  # peer_id -> public_key
         self._seen_nonces = set()
 
     def get_identity_public_bytes(self) -> bytes:
         """Получить публичный ключ для отправки пирам"""
         return self._identity_public.public_bytes(
-            encoding=serialization.Encoding.PEM,
+            encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
 
     def verify_peer_identity(self, peer_id: str, peer_public_bytes: bytes) -> bool:
         """Проверить и сохранить идентификационный ключ пира"""
         try:
-            peer_public = serialization.load_pem_public_key(peer_public_bytes)
+            peer_public = serialization.load_der_public_key(peer_public_bytes)
             self._peer_identity_keys[peer_id] = peer_public
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Ошибка загрузки ключа пира: {e}")
             return False
 
     def sign_data(self, data: bytes) -> bytes:
@@ -88,7 +93,9 @@ class SecureCryptoCore:
     def verify_signature(self, data: bytes, signature: bytes, peer_id: str) -> bool:
         """Проверить подпись пира"""
         if peer_id not in self._peer_identity_keys:
+            print(f"  ⚠️ Нет публичного ключа для {peer_id}")
             return False
+
         try:
             self._peer_identity_keys[peer_id].verify(
                 signature,
@@ -96,30 +103,43 @@ class SecureCryptoCore:
                 ec.ECDSA(hashes.SHA256())
             )
             return True
-        except InvalidSignature:
+        except InvalidSignature as e:
+            print(f"  ⚠️ Недействительная подпись: {e}")
             return False
 
-    def create_secure_session(self, peer_id: str, peer_ephemeral_public: bytes) -> Tuple[str, dict]:
+    def create_secure_session(self, peer_id: str, peer_ephemeral_bytes: bytes,
+                             peer_chat_id: Optional[str] = None) -> Tuple[str, dict]:
         """
         Создать защищённую сессию с пиром
-        """
-        # Генерируем эфемерную ключевую пару для этой сессии
-        ephemeral_private = ec.generate_private_key(ec.SECP384R1())
-        ephemeral_public = ephemeral_private.public_key()
 
-        # Загружаем эфемерный ключ пира (теперь используем DER, так как договорились)
-        peer_ephemeral = serialization.load_der_public_key(peer_ephemeral_public)
+        Args:
+            peer_id: идентификатор пира
+            peer_ephemeral_bytes: байты эфемерного ключа пира (DER)
+            peer_chat_id: chat_id пира (если известен, например при ответе на handshake)
+
+        Returns:
+            local_chat_id: локальный идентификатор чата
+            response_data: данные для ответа (публичный ключ и подпись)
+        """
+        # Загружаем эфемерный ключ пира
+        try:
+            peer_ephemeral = serialization.load_der_public_key(peer_ephemeral_bytes)
+        except Exception as e:
+            raise CryptoError(f"Не удалось загрузить ключ пира: {e}")
+
+        # Генерируем свою эфемерную ключевую пару
+        my_ephemeral_private = ec.generate_private_key(ec.SECP384R1())
+        my_ephemeral_public = my_ephemeral_private.public_key()
 
         # Вычисляем общий секрет через ECDH
-        shared_secret = ephemeral_private.exchange(ec.ECDH(), peer_ephemeral)
+        shared_secret = my_ephemeral_private.exchange(ec.ECDH(), peer_ephemeral)
 
-        # Получаем байты своего идентификационного ключа (DER для консистентности)
+        # Получаем байты идентификационных ключей
         my_identity_bytes = self._identity_public.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
 
-        # Получаем байты ключа пира
         peer_identity_bytes = self._peer_identity_keys[peer_id].public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -140,37 +160,79 @@ class SecureCryptoCore:
         encrypt_key = session_key_material[:32]
         mac_key = session_key_material[32:]
 
-        # Создаём ID чата
-        chat_id = hashlib.sha256(
+        # Создаём локальный ID чата
+        local_chat_id = hashlib.sha256(
             f"{self.device_id}:{peer_id}:{time.time()}:{secrets.token_hex(8)}".encode()
         ).hexdigest()[:16]
 
         # Сохраняем сессию
-        self._session_keys[chat_id] = SessionKeys(encrypt_key, mac_key, peer_id)
+        self._session_keys[local_chat_id] = SessionKeys(encrypt_key, mac_key, peer_id)
 
-        # Используем DER для консистентности с входными данными
-        my_ephemeral_bytes = ephemeral_public.public_bytes(
+        # Если известен chat_id пира, сохраняем маппинг
+        if peer_chat_id:
+            self._local_to_remote[local_chat_id] = peer_chat_id
+            self._remote_to_local[peer_chat_id] = local_chat_id
+            print(f"  📍 Маппинг: {local_chat_id[:8]} <-> {peer_chat_id[:8]}")
+
+        # Получаем байты своего эфемерного ключа для ответа
+        my_ephemeral_bytes = my_ephemeral_public.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
 
-        # Подписываем именно эти байты!
+        # Подписываем эти байты
         signature = self.sign_data(my_ephemeral_bytes)
 
-        return chat_id, {
+        return local_chat_id, {
             'ephemeral_public': base64.b64encode(my_ephemeral_bytes).decode(),
-            'signature': base64.b64encode(signature).decode()
+            'signature': base64.b64encode(signature).decode(),
+            'chat_id': local_chat_id  # Отправляем свой chat_id пиру
         }
 
-    def encrypt_message(self, chat_id: str, message: str, from_peer: str) -> dict:
+    def get_session_for_message(self, chat_id: str, is_remote: bool = True) -> Optional[Tuple[str, SessionKeys]]:
+        """
+        Получить сессию для сообщения по ID чата
+
+        Args:
+            chat_id: ID чата из сообщения
+            is_remote: True если это ID от пира, False если локальный
+
+        Returns:
+            Tuple (локальный_chat_id, сессия) или None
+        """
+        local_chat_id = chat_id
+
+        if is_remote:
+            # Конвертируем удалённый ID в локальный
+            local_chat_id = self._remote_to_local.get(chat_id)
+            if not local_chat_id:
+                print(f"  ❌ Нет маппинга для удалённого chat_id {chat_id[:8]}...")
+                print(f"     Доступные remote->local: {list(self._remote_to_local.keys())}")
+                return None
+
+        session = self._session_keys.get(local_chat_id)
+        if not session:
+            print(f"  ❌ Нет сессии для локального chat_id {local_chat_id[:8]}...")
+            return None
+
+        return local_chat_id, session
+
+    def encrypt_message(self, local_chat_id: str, message: str, from_peer: str) -> dict:
         """
         Зашифровать сообщение с аутентификацией
-        Защищено от replay-атак
-        """
-        if chat_id not in self._session_keys:
-            raise CryptoError(f"No session for chat {chat_id}")
 
-        session = self._session_keys[chat_id]
+        Args:
+            local_chat_id: локальный ID чата
+            message: текст сообщения
+            from_peer: отправитель
+
+        Returns:
+            dict: зашифрованные данные
+        """
+        if local_chat_id not in self._session_keys:
+            raise CryptoError(f"No session for local chat {local_chat_id}")
+
+        session = self._session_keys[local_chat_id]
         session.last_used = time.time()
         session.counter += 1
         counter = session.counter
@@ -210,8 +272,12 @@ class SecureCryptoCore:
             hashlib.sha256
         ).digest()
 
+        # Получаем remote_chat_id для пира
+        remote_chat_id = self._local_to_remote.get(local_chat_id)
+
         return {
-            'chat_id': chat_id,
+            'local_chat_id': local_chat_id,      # для себя
+            'remote_chat_id': remote_chat_id,    # для пира
             'counter': counter,
             'nonce': base64.b64encode(nonce).decode(),
             'iv': base64.b64encode(iv).decode(),
@@ -222,24 +288,43 @@ class SecureCryptoCore:
     def decrypt_message(self, encrypted: dict, expected_from: str) -> dict:
         """
         Расшифровать и проверить сообщение
-        Защищено от replay и timing attacks
+
+        Args:
+            encrypted: зашифрованные данные
+            expected_from: ожидаемый отправитель
+
+        Returns:
+            dict: расшифрованные данные
         """
-        chat_id = encrypted['chat_id']
+        # Определяем, какой chat_id использовать для поиска сессии
+        if 'remote_chat_id' in encrypted and encrypted['remote_chat_id']:
+            # Это сообщение от пира, используем его remote_chat_id для маппинга
+            chat_id = encrypted['remote_chat_id']
+            result = self.get_session_for_message(chat_id, is_remote=True)
+            if not result:
+                raise CryptoError(f"No session for remote chat {chat_id[:8]}...")
+            local_chat_id, session = result
+        else:
+            # Старый формат - пробуем как есть
+            chat_id = encrypted.get('chat_id')
+            if not chat_id:
+                raise CryptoError("No chat_id in message")
+
+            session = self._session_keys.get(chat_id)
+            if not session:
+                raise CryptoError(f"No session for chat {chat_id[:8]}...")
+            local_chat_id = chat_id
+
         counter = encrypted['counter']
         nonce = base64.b64decode(encrypted['nonce'])
         iv = base64.b64decode(encrypted['iv'])
         ciphertext = base64.b64decode(encrypted['ciphertext'])
         received_mac = base64.b64decode(encrypted['mac'])
 
-        if chat_id not in self._session_keys:
-            raise CryptoError(f"No session for chat {chat_id}")
-
-        session = self._session_keys[chat_id]
-
         # Проверяем nonce на повтор
-        nonce_key = f"{chat_id}:{base64.b64encode(nonce).decode()}"
+        nonce_key = f"{local_chat_id}:{base64.b64encode(nonce).decode()}"
         if nonce_key in self._seen_nonces:
-            raise CryptoError("Replay attack detected")
+            raise ReplayAttackError(local_chat_id, counter, nonce_key)
         self._seen_nonces.add(nonce_key)
 
         # Очищаем старые nonce
@@ -248,7 +333,7 @@ class SecureCryptoCore:
 
         # Проверяем счётчик
         if counter <= session.counter:
-            raise CryptoError("Invalid counter - possible replay")
+            raise CryptoError(f"Invalid counter: {counter} <= {session.counter}")
         session.counter = counter
 
         # Проверяем MAC
@@ -278,7 +363,7 @@ class SecureCryptoCore:
 
         # Проверяем отправителя
         if message_data['from'] != expected_from:
-            raise CryptoError(f"Sender mismatch")
+            raise CryptoError(f"Sender mismatch: {message_data['from']} != {expected_from}")
 
         session.last_used = time.time()
         return message_data
@@ -295,9 +380,7 @@ class SecureCryptoCore:
         new_mac = secrets.token_bytes(32)
 
         # Заменяем сессию
-        self._session_keys[chat_id] = SessionKeys(
-            new_encrypt, new_mac, old_session.peer_id
-        )
+        self._session_keys[chat_id] = SessionKeys(new_encrypt, new_mac, old_session.peer_id)
 
         return {
             'type': 'key_rotation',
