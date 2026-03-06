@@ -32,6 +32,7 @@ class MessageType(str, Enum):
     # Установка защищённого соединения
     HANDSHAKE_INIT = "handshake_init"
     HANDSHAKE_RESPONSE = "handshake_response"
+    HANDSHAKE_COMPLETE = "handshake_complete"
     HANDSHAKE_REJECT = "handshake_reject"
 
     # Основные сообщения

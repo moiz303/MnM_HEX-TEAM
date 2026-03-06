@@ -1,11 +1,14 @@
+// Active peers (populated from backend /api/peers). Keep mock fallback if API unavailable.
+let peers = [];
+
 const mockPeers = [
-    { id: 1, ip: '192.168.1.102', ping: 12, online: true },
-    { id: 2, ip: '192.168.1.105', ping: 8, online: true },
-    { id: 3, ip: '192.168.1.110', ping: 25, online: false },
-    { id: 4, ip: '192.168.1.115', ping: 15, online: true },
-    { id: 5, ip: '192.168.1.120', ping: 30, online: true },
-    { id: 6, ip: '192.168.1.125', ping: 18, online: false },
-    { id: 7, ip: '192.168.1.130', ping: 22, online: true }
+    { id: 1, ip: '192.168.1.102', username: '192.168.1.102', ping: 12, online: true },
+    { id: 2, ip: '192.168.1.105', username: '192.168.1.105', ping: 8, online: true },
+    { id: 3, ip: '192.168.1.110', username: '192.168.1.110', ping: 25, online: false },
+    { id: 4, ip: '192.168.1.115', username: '192.168.1.115', ping: 15, online: true },
+    { id: 5, ip: '192.168.1.120', username: '192.168.1.120', ping: 30, online: true },
+    { id: 6, ip: '192.168.1.125', username: '192.168.1.125', ping: 18, online: false },
+    { id: 7, ip: '192.168.1.130', username: '192.168.1.130', ping: 22, online: true }
 ];
 
 const randomResponses = [
@@ -64,33 +67,45 @@ function getInitials(ip) {
     return parts[parts.length - 1];
 }
 
-function updatePingAndStatus() {
-    mockPeers.forEach(peer => {
-        peer.ping = Math.max(5, peer.ping + Math.floor(Math.random() * 10) - 5);
-        
-        if (Math.random() < 0.05) {
-            peer.online = !peer.online;
-        }
-    });
-    
+async function fetchPeersPolling() {
+    try {
+        const res = await fetch('/api/peers');
+        if (!res.ok) throw new Error('fetch failed');
+        const data = await res.json();
+        // Map backend peers to UI shape
+        peers = (data.peers || []).map((p, idx) => ({
+            id: p.username || p.ip || idx,
+            username: p.username || p.ip,
+            ip: p.ip || p.username,
+            ping: Math.floor(Math.random() * 40) + 5,
+            online: p.status === 'online',
+            has_chat: p.has_chat || false
+        }));
+    } catch (err) {
+        // fallback to mock if API unavailable
+        peers = mockPeers;
+    }
+
     renderPeers(searchInput.value);
-    
+
     if (activePeer) {
-        const updatedPeer = mockPeers.find(p => p.id === activePeer.id);
-        if (updatedPeer) {
-            activePeer = updatedPeer;
+        const updated = peers.find(p => p.username === activePeer.username || p.id === activePeer.id);
+        if (updated) {
+            activePeer = updated;
             updateHeader();
         }
     }
 }
 
-setInterval(updatePingAndStatus, 3000);
+// Poll peers every 3s
+fetchPeersPolling();
+setInterval(fetchPeersPolling, 3000);
 
 function renderPeers(filter = '') {
-    const filtered = mockPeers.filter(p => p.ip.includes(filter));
-    
+    const filtered = peers.filter(p => (p.ip || p.username || '').includes(filter));
+
     peersList.innerHTML = filtered.map(peer => `
-        <div class="peer-item ${activePeer?.id === peer.id ? 'active' : ''}" data-peer-id="${peer.id}">
+        <div class="peer-item ${activePeer?.id === peer.id ? 'active' : ''}" data-peer-username="${peer.username}">
             <div class="avatar">
                 <span>${getInitials(peer.ip)}</span>
                 <div class="status-indicator ${peer.online ? 'online' : 'offline'}"></div>
@@ -106,33 +121,65 @@ function renderPeers(filter = '') {
             </div>
         </div>
     `).join('');
-    
+
     document.querySelectorAll('.peer-item').forEach(item => {
         item.addEventListener('click', () => {
-            const peerId = parseInt(item.dataset.peerId);
-            selectPeer(peerId);
+            const username = item.dataset.peerUsername;
+            selectPeerByUsername(username);
         });
     });
 }
 
-function selectPeer(peerId) {
-    activePeer = mockPeers.find(p => p.id === peerId);
+async function selectPeerByUsername(username) {
+    activePeer = peers.find(p => p.username === username);
     if (!activePeer) return;
-    
-    if (!messages[peerId]) {
-        messages[peerId] = [];
-    }
-    
+
+    // ensure messages bucket
+    if (!messages[activePeer.username]) messages[activePeer.username] = [];
+
     renderPeers(searchInput.value);
     updateHeader();
+
+    // If no active chat, try to initiate handshake
+    if (!activePeer.has_chat) {
+        try {
+            const res = await fetch('/api/start_chat', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: activePeer.username })
+            });
+            if (res.ok) {
+                activePeer.has_chat = true;
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    // Load message history from backend
+    try {
+        const url = new URL('/api/get_messages', window.location.origin);
+        url.searchParams.set('peer', activePeer.username);
+        const r = await fetch(url);
+        if (r.ok) {
+            const data = await r.json();
+            // map messages to simple structure
+            messages[activePeer.username] = (data.messages || []).map(m => ({
+                text: m.text || '',
+                time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+                sent: m.from === 'me'
+            }));
+        }
+    } catch (e) {
+        // fallback: keep existing messages
+    }
+
     renderMessages();
-    
     messagesArea.querySelector('.empty-state')?.remove();
 }
 
 function updateHeader() {
     if (!activePeer) return;
-    
+
     headerAvatar.innerHTML = `
         <span>${getInitials(activePeer.ip)}</span>
         <div class="status-indicator ${activePeer.online ? 'online' : 'offline'}"></div>
@@ -142,10 +189,10 @@ function updateHeader() {
 }
 
 function renderMessages() {
-    if (!activePeer || !messages[activePeer.id]) return;
-    
-    const msgs = messages[activePeer.id];
-    
+    if (!activePeer || !messages[activePeer.username]) return;
+
+    const msgs = messages[activePeer.username];
+
     messagesArea.innerHTML = msgs.map(msg => `
         <div class="message ${msg.sent ? 'sent' : 'received'}">
             ${!msg.sent ? `
@@ -164,52 +211,54 @@ function renderMessages() {
             ` : ''}
         </div>
     `).join('');
-    
+
     messagesArea.scrollTop = messagesArea.scrollHeight;
 }
 
 function sendMessage() {
     if (!activePeer || (!messageInput.value.trim() && selectedFiles.length === 0)) return;
-    
+
     const text = messageInput.value.trim();
     const now = new Date();
     const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    
+
+    // locally append
     if (text) {
-        messages[activePeer.id].push({
-            text,
-            time,
-            sent: true
-        });
+        if (!messages[activePeer.username]) messages[activePeer.username] = [];
+        messages[activePeer.username].push({ text, time, sent: true });
     }
-    
+
     if (selectedFiles.length > 0) {
         selectedFiles.forEach(file => {
-            messages[activePeer.id].push({
-                text: `📎 ${file.name}`,
-                time,
-                sent: true
-            });
+            messages[activePeer.username].push({ text: `📎 ${file.name}`, time, sent: true });
         });
         selectedFiles = [];
         filePreview.classList.add('hidden');
         filePreview.innerHTML = '';
     }
-    
+
     messageInput.value = '';
     renderMessages();
-    
-    setTimeout(() => {
-        const randomResponse = randomResponses[Math.floor(Math.random() * randomResponses.length)];
-        
-        messages[activePeer.id].push({
-            text: randomResponse,
-            time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-            sent: false
+
+    // Send to backend
+    if (text) {
+        fetch('/api/send_message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ peer: activePeer.username, text })
+        }).catch(() => {
+            // ignore send errors for now
         });
-        
-        renderMessages();
-    }, 500 + Math.random() * 1500);
+    }
+
+    // Simulate reply only if using mock backend
+    if (peers === mockPeers) {
+        setTimeout(() => {
+            const randomResponse = randomResponses[Math.floor(Math.random() * randomResponses.length)];
+            messages[activePeer.username].push({ text: randomResponse, time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), sent: false });
+            renderMessages();
+        }, 500 + Math.random() * 1500);
+    }
 }
 
 function deleteChat() {
