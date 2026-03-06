@@ -26,14 +26,6 @@ class HandshakeManager:
     def initiate(self, peer_name: str, peer_ip: str, peer_device_id: str) -> dict:
         """
         Инициировать handshake с пиром
-
-        Args:
-            peer_name: имя пира
-            peer_ip: IP пира
-            peer_device_id: device_id пира
-
-        Returns:
-            dict: сообщение для отправки
         """
         # Генерируем эфемерную ключевую пару
         ephemeral_private = ec.generate_private_key(ec.SECP384R1())
@@ -72,13 +64,6 @@ class HandshakeManager:
     def handle_initiation(self, data: dict, addr: tuple) -> Optional[dict]:
         """
         Обработать входящий handshake
-
-        Args:
-            data: данные запроса
-            addr: адрес отправителя
-
-        Returns:
-            Optional[dict]: ответное сообщение или None при ошибке
         """
         peer_name = data['from']
         peer_device = data['device_id']

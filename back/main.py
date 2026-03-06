@@ -54,7 +54,7 @@ class SecureMessenger:
         self.db = SecureDatabase()
 
         print(f"[*] Подготовка handshake-менеджера...")
-        self.handshake = HandshakeManager(self.crypto)
+        self.handshake = HandshakeManager(self.crypto, self.username)
 
         # Активные чаты: peer_name -> chat_id
         self.active_chats = {}
