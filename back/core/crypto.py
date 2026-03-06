@@ -119,8 +119,14 @@ class SecureCryptoCore:
 
         # Смешиваем с идентификационными ключами для защиты от MITM
         combined = shared_secret + \
-                   self._identity_public.public_bytes(...) + \
-                   self._peer_identity_keys[peer_id].public_bytes(...)
+                   self._identity_public.public_bytes(
+                       encoding=serialization.Encoding.DER,
+                       format=serialization.PublicFormat.SubjectPublicKeyInfo
+                   ) + \
+                   self._peer_identity_keys[peer_id].public_bytes(
+                       encoding=serialization.Encoding.DER,
+                       format=serialization.PublicFormat.SubjectPublicKeyInfo
+                   )
 
         # Генерируем ключи сессии
         session_key_material = HKDF(
@@ -144,7 +150,10 @@ class SecureCryptoCore:
 
         return chat_id, {
             'ephemeral_public': base64.b64encode(
-                ephemeral_public.public_bytes(...)
+                ephemeral_public.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
             ).decode(),
             'signature': base64.b64encode(
                 self.sign_data(ephemeral_public.public_bytes(...))
