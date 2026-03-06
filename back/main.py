@@ -222,7 +222,24 @@ class SecureMessenger:
             msg_id = hashlib.sha256(
                 f"{sender}{decrypted['timestamp']}{decrypted['content']}".encode()
             ).hexdigest()[:16]
+            # Попытаемся определить локальный chat_id
+            local_chat_id = None
+            if sender in self.active_chats:
+                local_chat_id = self.active_chats[sender]
+            else:
+                # Попробуем получить через crypto mapping
+                try:
+                    remote_id = encrypted.get('remote_chat_id') or encrypted.get('chat_id')
+                    res = self.crypto.get_session_for_message(remote_id, is_remote=True) if remote_id else None
+                    if res:
+                        local_chat_id = res[0]
+                except Exception:
+                    local_chat_id = None
 
+            try:
+                self.db.add_message(msg_id, local_chat_id or 'unknown', sender, decrypted['content'].encode(), 'in')
+            except Exception as e:
+                print(f"   ❌ Не удалось сохранить сообщение в БД: {e}")
             # Здесь нужно сохранить в БД
             # self.db.add_message(...)
 
@@ -284,6 +301,12 @@ class SecureMessenger:
 
             if self.connection.send_to_peer(ip, message):
                 print(f"   ✅ {peer_name}: {text}")
+                # Сохраняем исходящее сообщение в БД
+                try:
+                    msg_id = hashlib.sha256(f"{self.username}{time.time()}{text}".encode()).hexdigest()[:16]
+                    self.db.add_message(msg_id, local_chat_id, self.username, text.encode(), 'out')
+                except Exception as e:
+                    print(f"   ⚠️ Не удалось сохранить исходящее сообщение: {e}")
                 return True
             else:
                 print(f"   ❌ Не удалось отправить")

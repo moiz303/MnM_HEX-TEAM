@@ -331,10 +331,25 @@ class LocalAPI:
         result = []
         for msg in messages:
             sender, encrypted, timestamp, delivered = msg
+            text = "[encrypted]"
+            try:
+                # если в БД хранится читаемый текст — вернём его
+                if isinstance(encrypted, (bytes, bytearray)):
+                    try:
+                        decoded = encrypted.decode('utf-8')
+                        text = decoded
+                    except Exception:
+                        # возможно это сериализованный JSON или бинарные данные
+                        text = "[encrypted]"
+                elif isinstance(encrypted, str):
+                    text = encrypted
+            except Exception:
+                text = "[encrypted]"
+
             result.append({
                 'msg_id': f"msg_{timestamp}",
                 'from': 'me' if sender == self.backend.username else sender,
-                'text': "[encrypted]",  # В реальности нужно расшифровать
+                'text': text,
                 'timestamp': timestamp,
                 'status': 'delivered' if delivered else 'sent'
             })
