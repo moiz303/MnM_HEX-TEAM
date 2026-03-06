@@ -62,41 +62,70 @@ class HandshakeManager:
         }
 
     def handle_initiation(self, data: dict, addr: tuple) -> Optional[dict]:
-        """
-        Обработать входящий handshake
-        """
+        """Обработать входящий handshake"""
         peer_name = data['from']
         peer_device = data['device_id']
         nonce = data['nonce']
-
-        # Получаем байты ключа пира
         peer_ephemeral_bytes = base64.b64decode(data['ephemeral_public'])
         signature = base64.b64decode(data['signature'])
 
-        # Проверяем подпись на байтах ключа
+        # Проверяем подпись
         if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
             print(f"❌ Недействительная подпись от {peer_name}")
             return None
 
-        # ВАЖНО: создаём сессию, передавая байты ключа (не объект!)
-        # Функция create_secure_session сама загрузит ключ через load_der_public_key
+        # ВАЖНО: из запроса мы НЕ знаем chat_id пира, поэтому не передаём
         chat_id, response_data = self.crypto.create_secure_session(
             peer_device,
-            peer_ephemeral_bytes  # Передаём байты, а не объект!
+            peer_ephemeral_bytes,
+            peer_chat_id=None  # Пока не знаем chat_id пира
         )
 
-        # Формируем ответ
+        # Сохраняем связь между пиром и его chat_id (который он нам отправит потом)
+        # Но сейчас мы ещё не знаем его chat_id
+
         response = {
             'type': MessageType.HANDSHAKE_RESPONSE,
             'nonce': nonce,
             'from': self.username,
             'device_id': self.crypto.device_id,
-            'chat_id': chat_id,
+            'chat_id': chat_id,  # Отправляем свой chat_id пиру
             'ephemeral_public': response_data['ephemeral_public'],
             'signature': response_data['signature']
         }
 
         return response
+
+    def handle_response(self, data: dict) -> Tuple[bool, Optional[str]]:
+        """Обработать ответ на handshake"""
+        nonce = data['nonce']
+        peer_name = data['from']
+        peer_device = data['device_id']
+        peer_chat_id = data['chat_id']  # Это chat_id пира!
+        peer_ephemeral_bytes = base64.b64decode(data['ephemeral_public'])
+        signature = base64.b64decode(data['signature'])
+
+        if nonce not in self.pending_handshakes:
+            print(f"❌ Нет ожидающего handshake с nonce {nonce}")
+            return False, None
+
+        handshake_data = self.pending_handshakes[nonce]
+
+        # Проверяем подпись
+        if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
+            print(f"❌ Недействительная подпись в handshake response от {peer_name}")
+            return False, None
+
+        # ВАЖНО: теперь мы знаем chat_id пира!
+        # Создаём сессию и сразу сохраняем маппинг
+        local_chat_id, _ = self.crypto.create_secure_session(
+            peer_device,
+            peer_ephemeral_bytes,
+            peer_chat_id=peer_chat_id
+        )
+
+        del self.pending_handshakes[nonce]
+        return True, local_chat_id
 
     def handle_response(self, data: dict) -> Tuple[bool, Optional[str]]:
         """

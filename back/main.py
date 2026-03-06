@@ -104,8 +104,8 @@ class SecureMessenger:
 
     def _handle_secure_message(self, data: dict, addr: tuple):
         """Обработка защищённого сообщения"""
-        chat_id = data['chat_id']
         encrypted = data['encrypted']
+        chat_id =  data['chat_id']
 
         # Определяем отправителя
         sender = None
@@ -115,11 +115,11 @@ class SecureMessenger:
                 break
 
         if not sender:
-            print(f"\n[!] Неизвестный отправитель {addr[0]}")
+            print(f"[!] Неизвестный отправитель {addr[0]}")
             return
 
-        # Расшифровываем
         try:
+            # Расшифровываем - функция сама найдёт правильную сессию
             decrypted = self.crypto.decrypt_message(encrypted, sender)
             print(f"\n[{sender}]: {decrypted['content']}")
 
@@ -155,13 +155,13 @@ class SecureMessenger:
             print(f"[-] {peer_name} не отвечает")
             return False
 
-    def send_message(self, peer_name: str, text: str):
+    def send_message(self, peer_name: str, text: str) -> bool:
         """Отправить сообщение"""
         if peer_name not in self.active_chats:
-            print(f"[-] Нет активного чата с {peer_name}. Начните /chat {peer_name}")
+            print(f"[-] Нет активного чата с {peer_name}")
             return False
 
-        chat_id = self.active_chats[peer_name]
+        local_chat_id = self.active_chats[peer_name]  # Это локальный chat_id
 
         # Находим пира
         peer = self.discovery.get_peer_by_name(peer_name)
@@ -171,22 +171,19 @@ class SecureMessenger:
 
         ip, info = peer
 
-        # Шифруем
-        encrypted = self.crypto.encrypt_message(chat_id, text, self.username)
+        # Шифруем сообщение (используем локальный chat_id)
+        encrypted = self.crypto.encrypt_message(local_chat_id, text, self.username)
 
-        # Отправляем
+        # Отправляем пиру
         message = {
             'type': MessageType.SECURE_MESSAGE,
-            'chat_id': chat_id,
-            'encrypted': encrypted
+            'encrypted': encrypted  # В encrypted уже есть remote_chat_id для пира
         }
 
         if self.connection.send_to_peer(ip, message):
             print(f"[→] {peer_name}: {text}")
             return True
-        else:
-            print(f"[-] Не удалось отправить, {peer_name} недоступен")
-            return False
+        return False
 
     def list_peers(self):
         """Показать активных пиров"""

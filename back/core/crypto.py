@@ -62,6 +62,11 @@ class SecureCryptoCore:
         self._peer_identity_keys: Dict[str, Any] = {}  # peer_id -> public_key
         self._seen_nonces = set()
 
+        self._session_keys: Dict[str, SessionKeys] = {}  # локальный chat_id -> ключи
+        self._peer_chat_ids: Dict[str, str] = {}  # локальный chat_id -> chat_id пира
+        self._local_to_remote: Dict[str, str] = {}  # маппинг локальных ID на удалённые
+        self._remote_to_local: Dict[str, str] = {}  # маппинг удалённых ID на локальные
+
     def get_identity_public_bytes(self) -> bytes:
         """Получить публичный ключ для отправки пирам"""
         return self._identity_public.public_bytes(
@@ -99,7 +104,8 @@ class SecureCryptoCore:
         except InvalidSignature:
             return False
 
-    def create_secure_session(self, peer_id: str, peer_ephemeral_public: bytes) -> Tuple[str, dict]:
+    def create_secure_session(self, peer_id: str, peer_ephemeral_public: bytes,
+                             peer_chat_id: Optional[str] = None) -> Tuple[str, dict]:
         """
         Создать защищённую сессию с пиром
         """
@@ -157,18 +163,46 @@ class SecureCryptoCore:
         # Подписываем именно эти байты!
         signature = self.sign_data(my_ephemeral_bytes)
 
-        return chat_id, {
+        # Создаём локальный ID чата
+        local_chat_id = hashlib.sha256( f"{self.device_id}:{peer_id}:{time.time()}:{secrets.token_hex(8)}".encode()).hexdigest()[:16]
+
+        # Сохраняем сессию
+        self._session_keys[local_chat_id] = SessionKeys(encrypt_key, mac_key, peer_id)
+
+        # Если удалённый chat_id (например, при ответе на handshake)
+        if peer_chat_id:
+            self._local_to_remote[local_chat_id] = peer_chat_id
+            self._remote_to_local[peer_chat_id] = local_chat_id
+
+        # Для ответа нужно отправить свой локальный chat_id
+        return local_chat_id, {
             'ephemeral_public': base64.b64encode(my_ephemeral_bytes).decode(),
-            'signature': base64.b64encode(signature).decode()
+            'signature': base64.b64encode(signature).decode(),
+            'chat_id': local_chat_id  # Отправляем свой chat_id пиру
         }
+
+    def get_session_for_message(self, chat_id: str, is_remote: bool = True) -> Optional[SessionKeys]:
+        """
+        Получить сессию для сообщения
+        """
+        local_chat_id = chat_id
+        if is_remote:
+            # Конвертируем удалённый ID в локальный
+            local_chat_id = self._remote_to_local.get(chat_id)
+            if not local_chat_id:
+                print(f"  Нет маппинга для удалённого chat_id {chat_id}")
+                return None
+
+        return self._session_keys.get(local_chat_id)
 
     def encrypt_message(self, chat_id: str, message: str, from_peer: str) -> dict:
         """
         Зашифровать сообщение с аутентификацией
         Защищено от replay-атак
         """
-        if chat_id not in self._session_keys:
-            raise CryptoError(f"No session for chat {chat_id}")
+        session = self._session_keys.get(chat_id)
+        if not session:
+            raise CryptoError(f"No session for local chat {chat_id}")
 
         session = self._session_keys[chat_id]
         session.last_used = time.time()
@@ -211,7 +245,8 @@ class SecureCryptoCore:
         ).digest()
 
         return {
-            'chat_id': chat_id,
+            'local_chat_id': chat_id,  # для себя
+            'remote_chat_id': self._local_to_remote.get(chat_id),  # для пира
             'counter': counter,
             'nonce': base64.b64encode(nonce).decode(),
             'iv': base64.b64encode(iv).decode(),
@@ -221,67 +256,77 @@ class SecureCryptoCore:
 
     def decrypt_message(self, encrypted: dict, expected_from: str) -> dict:
         """
-        Расшифровать и проверить сообщение
-        Защищено от replay и timing attacks
+        Расшифровать сообщение (использует chat_id из сообщения)
         """
-        chat_id = encrypted['chat_id']
-        counter = encrypted['counter']
-        nonce = base64.b64decode(encrypted['nonce'])
-        iv = base64.b64decode(encrypted['iv'])
-        ciphertext = base64.b64decode(encrypted['ciphertext'])
-        received_mac = base64.b64decode(encrypted['mac'])
+        # Определяем, какой chat_id использовать для поиска сессии
+        if 'remote_chat_id' in encrypted and encrypted['remote_chat_id']:
+            # Это сообщение от пира, используем его chat_id для маппинга
+            session = self.get_session_for_message(encrypted['remote_chat_id'], is_remote=True)
+            if not session:
+                raise CryptoError(f"No session for remote chat {encrypted['remote_chat_id']}")
+        else:
+            # Старый формат - пробуем как есть
+            session = self._session_keys.get(encrypted.get('chat_id'))
+            if not session:
+                raise CryptoError(f"No session for chat {encrypted.get('chat_id')}")
+            chat_id = encrypted['chat_id']
+            counter = encrypted['counter']
+            nonce = base64.b64decode(encrypted['nonce'])
+            iv = base64.b64decode(encrypted['iv'])
+            ciphertext = base64.b64decode(encrypted['ciphertext'])
+            received_mac = base64.b64decode(encrypted['mac'])
 
-        if chat_id not in self._session_keys:
-            raise CryptoError(f"No session for chat {chat_id}")
+            if chat_id not in self._session_keys:
+                raise CryptoError(f"No session for chat {chat_id}")
 
-        session = self._session_keys[chat_id]
+            session = self._session_keys[chat_id]
 
-        # Проверяем nonce на повтор
-        nonce_key = f"{chat_id}:{base64.b64encode(nonce).decode()}"
-        if nonce_key in self._seen_nonces:
-            raise CryptoError("Replay attack detected")
-        self._seen_nonces.add(nonce_key)
+            # Проверяем nonce на повтор
+            nonce_key = f"{chat_id}:{base64.b64encode(nonce).decode()}"
+            if nonce_key in self._seen_nonces:
+                raise CryptoError("Replay attack detected")
+            self._seen_nonces.add(nonce_key)
 
-        # Очищаем старые nonce
-        if len(self._seen_nonces) > 10000:
-            self._seen_nonces.clear()
+            # Очищаем старые nonce
+            if len(self._seen_nonces) > 10000:
+                self._seen_nonces.clear()
 
-        # Проверяем счётчик
-        if counter <= session.counter:
-            raise CryptoError("Invalid counter - possible replay")
-        session.counter = counter
+            # Проверяем счётчик
+            if counter <= session.counter:
+                raise CryptoError("Invalid counter - possible replay")
+            session.counter = counter
 
-        # Проверяем MAC
-        mac_data = struct.pack('>Q', counter) + nonce + iv + ciphertext
-        expected_mac = hmac.new(
-            session.mac_key.read(),
-            mac_data,
-            hashlib.sha256
-        ).digest()
+            # Проверяем MAC
+            mac_data = struct.pack('>Q', counter) + nonce + iv + ciphertext
+            expected_mac = hmac.new(
+                session.mac_key.read(),
+                mac_data,
+                hashlib.sha256
+            ).digest()
 
-        if not hmac.compare_digest(expected_mac, received_mac):
-            raise CryptoError("Invalid MAC - message tampered")
+            if not hmac.compare_digest(expected_mac, received_mac):
+                raise CryptoError("Invalid MAC - message tampered")
 
-        # Расшифровываем
-        cipher = Cipher(
-            algorithms.AES(session.encrypt_key.read()),
-            modes.CBC(iv),
-            backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
-        padded = decryptor.update(ciphertext) + decryptor.finalize()
+            # Расшифровываем
+            cipher = Cipher(
+                algorithms.AES(session.encrypt_key.read()),
+                modes.CBC(iv),
+                backend=default_backend()
+            )
+            decryptor = cipher.decryptor()
+            padded = decryptor.update(ciphertext) + decryptor.finalize()
 
-        unpadder = padding.PKCS7(128).unpadder()
-        data = unpadder.update(padded) + unpadder.finalize()
+            unpadder = padding.PKCS7(128).unpadder()
+            data = unpadder.update(padded) + unpadder.finalize()
 
-        message_data = json.loads(data.decode())
+            message_data = json.loads(data.decode())
 
-        # Проверяем отправителя
-        if message_data['from'] != expected_from:
-            raise CryptoError(f"Sender mismatch")
+            # Проверяем отправителя
+            if message_data['from'] != expected_from:
+                raise CryptoError(f"Sender mismatch")
 
-        session.last_used = time.time()
-        return message_data
+            session.last_used = time.time()
+            return message_data
 
     def rotate_keys(self, chat_id: str) -> Optional[dict]:
         """Смена ключей для Perfect Forward Secrecy"""
