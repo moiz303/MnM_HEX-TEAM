@@ -44,7 +44,7 @@ class HandshakeManager:
         ephemeral_private = ec.generate_private_key(ec.SECP384R1())
         ephemeral_public = ephemeral_private.public_key()
 
-        # Получаем байты ключа в DER формате (для подписи и передачи)
+        # Получаем байты ключа в DER формате
         key_bytes = ephemeral_public.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -104,7 +104,8 @@ class HandshakeManager:
 
         print(f"  ✅ Подпись пира {peer_name} верна")
 
-        # Создаём сессию (мы - отвечающая сторона, поэтому peer_chat_id=None)
+        # ВАЖНО: Создаём сессию, НО мы ещё не знаем chat_id пира
+        # Поэтому peer_chat_id=None, маппинг будет создан позже
         local_chat_id, response_data = self.crypto.create_secure_session(
             peer_device,
             peer_ephemeral_bytes,
@@ -112,6 +113,15 @@ class HandshakeManager:
         )
 
         print(f"  ✅ Создана локальная сессия {local_chat_id[:8]}...")
+
+        # ВАЖНО: Сохраняем информацию о том, что мы ответили на handshake
+        # Это нужно для связи с отправителем
+        self.pending_handshakes[nonce] = {
+            'peer_name': peer_name,
+            'peer_device': peer_device,
+            'local_chat_id': local_chat_id,
+            'timestamp': time.time()
+        }
 
         # Формируем ответ
         response = {
@@ -144,6 +154,7 @@ class HandshakeManager:
         signature = base64.b64decode(data['signature'])
 
         print(f"  📥 Получен ответ на handshake от {peer_name}, nonce={nonce[:8]}...")
+        print(f"     Пир прислал свой chat_id: {peer_chat_id[:8]}...")
 
         # Проверяем, есть ли ожидающий handshake
         if nonce not in self.pending_handshakes:
@@ -159,15 +170,15 @@ class HandshakeManager:
 
         print(f"  ✅ Подпись пира {peer_name} верна")
 
-        # Завершаем создание сессии (мы - инициатор, поэтому передаём peer_chat_id)
+        # ВАЖНО: Завершаем создание сессии и ПЕРЕДАЁМ peer_chat_id для маппинга!
         local_chat_id, _ = self.crypto.create_secure_session(
             peer_device,
             peer_ephemeral_bytes,
-            peer_chat_id=peer_chat_id  # Сохраняем маппинг с chat_id пира
+            peer_chat_id=peer_chat_id  # Теперь мы знаем chat_id пира!
         )
 
         print(f"  ✅ Создана локальная сессия {local_chat_id[:8]}...")
-        print(f"  📍 Маппинг с пиром: local={local_chat_id[:8]} <-> remote={peer_chat_id[:8]}")
+        print(f"  📍 Маппинг: local={local_chat_id[:8]} <-> remote={peer_chat_id[:8]}")
 
         # Очищаем pending
         del self.pending_handshakes[nonce]

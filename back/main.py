@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Secure P2P Messenger
 Главный файл - поддерживает и GUI, и консольный режим
@@ -9,16 +8,13 @@ import time
 import hashlib
 import socket
 import base64
-import threading
 import cmd
-import json
-from typing import Optional
 
 from core.crypto import SecureCryptoCore
 from core.exceptions import CryptoError
 from network.discovery import PeerDiscovery
 from network.connection import ConnectionManager
-from network.protocols import MessageType, Limits, Timeouts
+from network.protocols import MessageType
 from storage.database import SecureDatabase
 from messaging.handshake import HandshakeManager
 
