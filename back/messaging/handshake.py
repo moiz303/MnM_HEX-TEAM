@@ -46,7 +46,10 @@ class HandshakeManager:
                 )
             ).decode(),
             'signature': base64.b64encode(
-                self.crypto.sign_data(ephemeral_public.public_bytes(...))
+                self.crypto.sign_data(ephemeral_public.public_bytes(
+                    encoding=serialization.Encoding.DER,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                ))
             ).decode()
         }
 
