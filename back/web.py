@@ -1,30 +1,78 @@
 import os
 import threading
 import time
+import json
+import socket
+import uuid
 from flask import Flask, jsonify, request, send_from_directory, abort
 from flask_cors import CORS
-import uuid
 from werkzeug.utils import secure_filename
 
 # Import backend classes (runs in-process)
 from main import SecureMessenger
 from api import LocalAPI
 
+SOCKET_PATH = "/tmp/secure_chat.sock"
 
 BASE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
 FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend')
+
+
+class UnixLocalAPIClient:
+    def __init__(self, path):
+        self.path = path
+        self._id = 1
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.sock.connect(self.path)
+            self.sock_file = self.sock.makefile('rwb')
+        except Exception:
+            self.sock = None
+
+    def call(self, method, params=None):
+        if not self.sock:
+            raise RuntimeError('No connection to LocalAPI')
+        req = {'id': self._id, 'method': method, 'params': params or {}}
+        self._id += 1
+        data = (json.dumps(req) + '\n').encode()
+        self.sock.sendall(data)
+        line = self.sock_file.readline()
+        if not line:
+            raise RuntimeError('Empty response from LocalAPI')
+        resp = json.loads(line.decode())
+        if 'error' in resp:
+            raise RuntimeError(resp['error'])
+        return resp.get('result')
 
 
 def create_app():
     app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
     CORS(app)
 
-    # Start backend messenger and local API in background threads.
-    # If SecureMessenger fails (e.g. network port already in use), fall back to a minimal mock backend
+    # Try to start SecureMessenger in-process. If it fails, try to connect
+    # to an existing LocalAPI over UNIX socket; otherwise fall back to a mock.
+    local_api = None
+    remote_client = None
+    messenger = None
+
     try:
         messenger = SecureMessenger('web_user')
+        local_api = LocalAPI(messenger)
+        threading.Thread(target=local_api.start, daemon=True).start()
+        print('[web] Started in-process SecureMessenger')
     except Exception as e:
-        print(f"[web] Warning: SecureMessenger failed to start: {e}")
+        print(f"[web] Could not start SecureMessenger: {e}")
+        try:
+            remote_client = UnixLocalAPIClient(SOCKET_PATH)
+            if remote_client.sock:
+                print('[web] Connected to existing LocalAPI via UNIX socket')
+            else:
+                remote_client = None
+        except Exception:
+            remote_client = None
+
+    if not local_api and not remote_client:
+        print('[web] Falling back to MockBackend')
 
         class MockBackend:
             def __init__(self):
@@ -35,29 +83,22 @@ def create_app():
                 self.db = self
                 self.discovery = self
 
-            # discovery methods
             def get_all_peers(self):
-                # return empty dict (no peers)
                 return {}
 
             def get_peer_by_name(self, name):
                 return None
 
-            # chat methods
             def start_chat(self, peer_name):
                 return False
 
             def send_message(self, peer_name, text):
                 return False
 
-            # db stub
             def get_conversation(self, chat_id, limit=50):
                 return []
 
         messenger = MockBackend()
-
-    local_api = LocalAPI(messenger)
-    threading.Thread(target=local_api.start, daemon=True).start()
 
     # Serve index and static files
     @app.route('/')
@@ -71,16 +112,83 @@ def create_app():
             abort(404)
         return send_from_directory(FRONTEND_DIR, filename)
 
-    # Simple API endpoints that call LocalAPI handlers
+    # call_handler supports three modes: local_api (in-process), remote_client (unix socket), messenger (mock/wrapper)
     def call_handler(name, params):
-        handler = local_api.methods.get(name)
-        if not handler:
-            return {'error': f'method {name} not found'}, 404
-        try:
-            result = handler(params or {})
-            return result, 200
-        except Exception as e:
-            return {'error': str(e)}, 400
+        params = params or {}
+        if local_api:
+            handler = local_api.methods.get(name)
+            if not handler:
+                return {'error': f'method {name} not found'}, 404
+            try:
+                result = handler(params)
+                return result, 200
+            except Exception as e:
+                return {'error': str(e)}, 400
+
+        if remote_client:
+            try:
+                res = remote_client.call(name, params)
+                return res, 200
+            except Exception as e:
+                return {'error': str(e)}, 400
+
+        # fallback to messenger methods if available
+        if messenger:
+            try:
+                if name == 'get_peers':
+                    peers = messenger.get_all_peers()
+                    # convert to LocalAPI get_peers shape
+                    out = []
+                    for ip, info in peers.items():
+                        has_chat = info.get('username') in getattr(messenger, 'active_chats', {})
+                        out.append({
+                            'username': info.get('username'),
+                            'device_id': info.get('device_id'),
+                            'ip': ip,
+                            'status': 'online',
+                            'last_seen': info.get('last_seen', time.time()),
+                            'has_chat': has_chat,
+                            'capabilities': ['files']
+                        })
+                    return {'peers': out}, 200
+
+                if name == 'get_peer_info':
+                    username = params.get('username')
+                    res = messenger.get_peer_by_name(username)
+                    if not res:
+                        raise ValueError('peer not found')
+                    ip, info = res
+                    return info, 200
+
+                if name == 'start_chat':
+                    ok = messenger.start_chat(params.get('username'))
+                    if ok:
+                        return {'status': 'handshake_initiated', 'chat_id': messenger.active_chats.get(params.get('username'))}, 200
+                    else:
+                        raise ValueError('start failed')
+
+                if name == 'send_message':
+                    peer = params.get('peer')
+                    text = params.get('text')
+                    ok = messenger.send_message(peer, text)
+                    if ok:
+                        return {'status': 'sent', 'timestamp': time.time()}, 200
+                    else:
+                        raise ValueError('send failed')
+
+                if name == 'get_messages':
+                    peer = params.get('peer')
+                    limit = params.get('limit', 50)
+                    msgs = messenger.get_conversation(peer, limit)
+                    return {'messages': msgs, 'total': len(msgs), 'count': len(msgs)}, 200
+
+                if name == 'get_my_info':
+                    return messenger.get_my_info() if hasattr(messenger, 'get_my_info') else {'username': messenger.username}, 200
+
+            except Exception as e:
+                return {'error': str(e)}, 400
+
+        return {'error': 'no backend available'}, 500
 
     @app.route('/api/peers', methods=['GET'])
     def api_peers():
@@ -125,36 +233,27 @@ def create_app():
 
     @app.route('/api/upload/init', methods=['POST'])
     def api_upload_init():
-        # JSON: {filename, size}
         data = request.get_json(force=True) or {}
         filename = data.get('filename')
         size = int(data.get('size', 0))
-        MAX_SIZE = 200 * 1024 * 1024  # 200 MB
+        MAX_SIZE = 200 * 1024 * 1024
         if not filename:
             return jsonify({'error': 'filename required'}), 400
         if size <= 0 or size > MAX_SIZE:
             return jsonify({'error': 'invalid size or exceeds 200MB limit'}), 400
 
         upload_id = uuid.uuid4().hex
-        # create temp dir for this upload
         upload_tmp = os.path.join(TMP_ROOT, upload_id)
         os.makedirs(upload_tmp, exist_ok=True)
 
-        # store metadata
-        meta = {
-            'filename': filename,
-            'size': size,
-            'received': 0
-        }
+        meta = {'filename': filename, 'size': size, 'received': 0}
         with open(os.path.join(upload_tmp, 'meta.json'), 'w') as f:
-            import json as _json
-            _json.dump(meta, f)
+            json.dump(meta, f)
 
         return jsonify({'upload_id': upload_id}), 200
 
     @app.route('/api/upload/chunk', methods=['POST'])
     def api_upload_chunk():
-        # multipart form-data: upload_id, index, chunk (file)
         upload_id = request.form.get('upload_id')
         index = request.form.get('index')
         if not upload_id or index is None:
@@ -176,14 +275,12 @@ def create_app():
         part_path = os.path.join(upload_tmp, f"{idx}.part")
         chunk.save(part_path)
 
-        # update received count (not strict)
         try:
-            import json as _json
             meta_path = os.path.join(upload_tmp, 'meta.json')
             if os.path.exists(meta_path):
-                meta = _json.load(open(meta_path))
+                meta = json.load(open(meta_path))
                 meta['received'] = meta.get('received', 0) + 1
-                _json.dump(meta, open(meta_path, 'w'))
+                json.dump(meta, open(meta_path, 'w'))
         except Exception:
             pass
 
@@ -201,20 +298,16 @@ def create_app():
         if not os.path.exists(meta_path):
             return jsonify({'error': 'invalid upload_id'}), 400
 
-        import json as _json
-        meta = _json.load(open(meta_path))
+        meta = json.load(open(meta_path))
         filename = meta.get('filename') or 'file'
 
-        # assemble parts
         parts = [p for p in os.listdir(upload_tmp) if p.endswith('.part')]
         if not parts:
             return jsonify({'error': 'no parts uploaded'}), 400
 
-        # sort by numeric prefix
         parts_sorted = sorted(parts, key=lambda x: int(x.split('.')[0]))
 
         safe_name = secure_filename(filename)
-        # prefix with upload_id to avoid clashes
         out_name = f"{upload_id}_{safe_name}"
         out_path = os.path.join(UPLOAD_ROOT, out_name)
 
@@ -223,7 +316,6 @@ def create_app():
                 with open(os.path.join(upload_tmp, part), 'rb') as pf:
                     out_f.write(pf.read())
 
-        # cleanup temp
         try:
             import shutil
             shutil.rmtree(upload_tmp)
