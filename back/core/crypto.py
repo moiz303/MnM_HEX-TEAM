@@ -102,33 +102,33 @@ class SecureCryptoCore:
     def create_secure_session(self, peer_id: str, peer_ephemeral_public: bytes) -> Tuple[str, dict]:
         """
         Создать защищённую сессию с пиром
-
-        Returns:
-            chat_id: идентификатор чата
-            response_data: данные для ответа (публичный ключ и подпись)
         """
         # Генерируем эфемерную ключевую пару для этой сессии
         ephemeral_private = ec.generate_private_key(ec.SECP384R1())
         ephemeral_public = ephemeral_private.public_key()
 
-        # Загружаем эфемерный ключ пира
-        peer_ephemeral = serialization.load_pem_public_key(peer_ephemeral_public)
+        # Загружаем эфемерный ключ пира (теперь используем DER, так как договорились)
+        peer_ephemeral = serialization.load_der_public_key(peer_ephemeral_public)
 
         # Вычисляем общий секрет через ECDH
         shared_secret = ephemeral_private.exchange(ec.ECDH(), peer_ephemeral)
 
-        # Смешиваем с идентификационными ключами для защиты от MITM
-        combined = shared_secret + \
-                   self._identity_public.public_bytes(
-                       encoding=serialization.Encoding.DER,
-                       format=serialization.PublicFormat.SubjectPublicKeyInfo
-                   ) + \
-                   self._peer_identity_keys[peer_id].public_bytes(
-                       encoding=serialization.Encoding.DER,
-                       format=serialization.PublicFormat.SubjectPublicKeyInfo
-                   )
+        # Получаем байты своего идентификационного ключа (DER для консистентности)
+        my_identity_bytes = self._identity_public.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
 
-        # Генерируем ключи сессии
+        # Получаем байты ключа пира
+        peer_identity_bytes = self._peer_identity_keys[peer_id].public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        # Смешиваем с идентификационными ключами для защиты от MITM
+        combined = shared_secret + my_identity_bytes + peer_identity_bytes
+
+        # Генерируем ключи сессии через HKDF
         session_key_material = HKDF(
             algorithm=hashes.SHA256(),
             length=64,  # 32 для шифрования + 32 для MAC
@@ -148,16 +148,18 @@ class SecureCryptoCore:
         # Сохраняем сессию
         self._session_keys[chat_id] = SessionKeys(encrypt_key, mac_key, peer_id)
 
+        # Используем DER для консистентности с входными данными
+        my_ephemeral_bytes = ephemeral_public.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+        # Подписываем именно эти байты!
+        signature = self.sign_data(my_ephemeral_bytes)
+
         return chat_id, {
-            'ephemeral_public': base64.b64encode(
-                ephemeral_public.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                )
-            ).decode(),
-            'signature': base64.b64encode(
-                self.sign_data(ephemeral_public.public_bytes(...))
-            ).decode()
+            'ephemeral_public': base64.b64encode(my_ephemeral_bytes).decode(),
+            'signature': base64.b64encode(signature).decode()
         }
 
     def encrypt_message(self, chat_id: str, message: str, from_peer: str) -> dict:
