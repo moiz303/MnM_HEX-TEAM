@@ -49,27 +49,29 @@ def create_app():
     app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
     CORS(app)
 
-    # Try to start SecureMessenger in-process. If it fails, try to connect
-    # to an existing LocalAPI over UNIX socket; otherwise fall back to a mock.
+    # Prefer connecting to an existing LocalAPI over UNIX socket (another process).
+    # If that fails, start SecureMessenger in-process and expose a LocalAPI server.
     local_api = None
     remote_client = None
     messenger = None
 
     try:
-        messenger = SecureMessenger('web_user')
-        local_api = LocalAPI(messenger)
-        threading.Thread(target=local_api.start, daemon=True).start()
-        print('[web] Started in-process SecureMessenger')
-    except Exception as e:
-        print(f"[web] Could not start SecureMessenger: {e}")
-        try:
-            remote_client = UnixLocalAPIClient(SOCKET_PATH)
-            if remote_client.sock:
-                print('[web] Connected to existing LocalAPI via UNIX socket')
-            else:
-                remote_client = None
-        except Exception:
+        remote_client = UnixLocalAPIClient(SOCKET_PATH)
+        if remote_client.sock:
+            print('[web] Connected to existing LocalAPI via UNIX socket')
+        else:
             remote_client = None
+    except Exception:
+        remote_client = None
+
+    if not remote_client:
+        try:
+            messenger = SecureMessenger('web_user')
+            local_api = LocalAPI(messenger)
+            threading.Thread(target=local_api.start, daemon=True).start()
+            print('[web] Started in-process SecureMessenger')
+        except Exception as e:
+            print(f"[web] Could not start SecureMessenger: {e}")
 
     if not local_api and not remote_client:
         print('[web] Falling back to MockBackend')
@@ -115,18 +117,57 @@ def create_app():
     # call_handler supports three modes: local_api (in-process), remote_client (unix socket), messenger (mock/wrapper)
     def call_handler(name, params):
         params = params or {}
+
+        # Helper to attempt start_chat then retry send
+        def _try_send_with_handshake(call_fn, peer, params):
+            try:
+                return call_fn(name, params)
+            except Exception:
+                try:
+                    call_fn('start_chat', {'username': peer})
+                except Exception:
+                    pass
+                return call_fn(name, params)
+
+        # In-process LocalAPI: call handler functions directly
         if local_api:
             handler = local_api.methods.get(name)
             if not handler:
                 return {'error': f'method {name} not found'}, 404
             try:
+                if name == 'send_message':
+                    try:
+                        result = handler(params)
+                        return result, 200
+                    except Exception:
+                        # attempt handshake then retry
+                        try:
+                            local_api.methods.get('start_chat')({'username': params.get('peer')})
+                        except Exception:
+                            pass
+                        result = handler(params)
+                        return result, 200
                 result = handler(params)
                 return result, 200
             except Exception as e:
                 return {'error': str(e)}, 400
 
+        # Remote LocalAPI over unix socket
         if remote_client:
             try:
+                if name == 'send_message':
+                    # first try, then attempt start_chat and retry
+                    try:
+                        res = remote_client.call(name, params)
+                        return res, 200
+                    except Exception:
+                        try:
+                            remote_client.call('start_chat', {'username': params.get('peer')})
+                        except Exception:
+                            pass
+                        res = remote_client.call(name, params)
+                        return res, 200
+
                 res = remote_client.call(name, params)
                 return res, 200
             except Exception as e:
@@ -137,7 +178,6 @@ def create_app():
             try:
                 if name == 'get_peers':
                     peers = messenger.get_all_peers()
-                    # convert to LocalAPI get_peers shape
                     out = []
                     for ip, info in peers.items():
                         has_chat = info.get('username') in getattr(messenger, 'active_chats', {})
@@ -224,6 +264,20 @@ def create_app():
     def api_my_info():
         res, code = call_handler('get_my_info', {})
         return jsonify(res), code
+
+    @app.route('/api/debug_backend', methods=['GET'])
+    def api_debug_backend():
+        info = {
+            'has_local_api': bool(local_api),
+            'has_remote_client': bool(remote_client),
+            'has_messenger_obj': bool(messenger)
+        }
+        if remote_client:
+            try:
+                info['remote_my_info'] = remote_client.call('get_my_info', {})
+            except Exception as e:
+                info['remote_error'] = str(e)
+        return jsonify(info), 200
 
     # ---------- File upload (chunked) endpoints ----------
     UPLOAD_ROOT = os.path.join(BASE_DIR, 'downloads', 'uploads')
