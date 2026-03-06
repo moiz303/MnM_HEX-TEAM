@@ -108,7 +108,8 @@ class SecureCryptoCore:
             return False
 
     def create_secure_session(self, peer_id: str, peer_ephemeral_bytes: bytes,
-                             peer_chat_id: Optional[str] = None) -> Tuple[str, dict]:
+                             peer_chat_id: Optional[str] = None,
+                             my_ephemeral_private: Optional[ec.EllipticCurvePrivateKey] = None) -> Tuple[str, dict]:
         """
         Создать защищённую сессию с пиром
 
@@ -127,8 +128,10 @@ class SecureCryptoCore:
         except Exception as e:
             raise CryptoError(f"Не удалось загрузить ключ пира: {e}")
 
-        # Генерируем свою эфемерную ключевую пару
-        my_ephemeral_private = ec.generate_private_key(ec.SECP384R1())
+        # Используем переданный эфемерный приватный ключ (инициатор),
+        # или генерируем новый (ответчик)
+        if my_ephemeral_private is None:
+            my_ephemeral_private = ec.generate_private_key(ec.SECP384R1())
         my_ephemeral_public = my_ephemeral_private.public_key()
 
         # Вычисляем общий секрет через ECDH
@@ -145,14 +148,31 @@ class SecureCryptoCore:
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         )
 
-        # Смешиваем с идентификационными ключами для защиты от MITM
-        combined = shared_secret + my_identity_bytes + peer_identity_bytes
+        # Смешиваем с идентификационными ключами для защиты от MITM.
+        # Порядок конкатенации должен быть детерминирован, поэтому сортируем
+        # по байтам, чтобы обе стороны получили одинаковую входную строку.
+        if my_identity_bytes < peer_identity_bytes:
+            combined = shared_secret + my_identity_bytes + peer_identity_bytes
+        else:
+            combined = shared_secret + peer_identity_bytes + my_identity_bytes
+
+        # Детерминированная соль для HKDF — смесь публичных эфемерных ключей в
+        # отсортированном порядке, чтобы обе стороны получали одинаковую соль.
+        my_ephemeral_bytes = my_ephemeral_public.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        peer_ephemeral_bytes_local = peer_ephemeral_bytes
+        if my_ephemeral_bytes < peer_ephemeral_bytes_local:
+            salt = hashlib.sha256(my_ephemeral_bytes + peer_ephemeral_bytes_local).digest()
+        else:
+            salt = hashlib.sha256(peer_ephemeral_bytes_local + my_ephemeral_bytes).digest()
 
         # Генерируем ключи сессии через HKDF
         session_key_material = HKDF(
             algorithm=hashes.SHA256(),
             length=64,  # 32 для шифрования + 32 для MAC
-            salt=secrets.token_bytes(16),
+            salt=salt,
             info=b'secure_chat_session',
             backend=default_backend()
         ).derive(combined)
@@ -175,6 +195,8 @@ class SecureCryptoCore:
             print(f"  📍 Маппинг: {local_chat_id[:8]} <-> {peer_chat_id[:8]}")
 
         # Получаем байты своего эфемерного ключа для ответа
+        # (если мы были инициатором и передали приватный ключ,
+        # то эти байты уже совпадают с отправлёнными ранее)
         my_ephemeral_bytes = my_ephemeral_public.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo
@@ -387,3 +409,15 @@ class SecureCryptoCore:
             'chat_id': chat_id,
             'timestamp': time.time()
         }
+
+    def register_chat_mapping(self, local_chat_id: str, remote_chat_id: str):
+        """Явно зарегистрировать маппинг между локальным и удалённым chat_id."""
+        # локальный -> удалённый
+        self._local_to_remote[local_chat_id] = remote_chat_id
+        # удалённый -> локальный
+        self._remote_to_local[remote_chat_id] = local_chat_id
+        # также регистрируем identity mapping для локального chat_id,
+        # чтобы входящие сообщения, содержащие наш local_chat_id в поле
+        # `remote_chat_id`, корректно разрешались в сессию.
+        self._remote_to_local[local_chat_id] = local_chat_id
+        print(f"  📍 Registered mapping: {local_chat_id[:8]} <-> {remote_chat_id[:8]} (and identity for local)")

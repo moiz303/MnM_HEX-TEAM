@@ -105,6 +105,9 @@ class SecureMessenger:
             elif msg_type == MessageType.HANDSHAKE_RESPONSE:
                 print(f"\n📥 Получен handshake RESPONSE от {addr[0]}")
                 self._handle_handshake_response(data, addr)
+            elif msg_type == MessageType.HANDSHAKE_COMPLETE:
+                print(f"\n📥 Получен handshake COMPLETE от {addr[0]}")
+                self._handle_handshake_complete(data, addr)
 
             elif msg_type == MessageType.SECURE_MESSAGE:
                 print(f"\n📥 Получено SECURE MESSAGE от {addr[0]}")
@@ -129,14 +132,27 @@ class SecureMessenger:
 
     def _handle_handshake_response(self, data: dict, addr: tuple):
         """Обработка ответа на handshake"""
-        success, chat_id = self.handshake.handle_response(data)
+        success, chat_id, follow_up = self.handshake.handle_response(data)
         if success:
             peer_name = data['from']
             self.active_chats[peer_name] = chat_id
             print(f"\n✅ Защищённый канал с {peer_name} установлен!")
             print(f"   Локальный chat_id: {chat_id[:8]}...")
+
+            # Если есть follow-up сообщение (HANDSHAKE_COMPLETE), отправим его
+            if follow_up:
+                print(f"   ✅ Отправляем HANDSHAKE_COMPLETE для финализации маппинга")
+                self.connection.send_to_peer(addr[0], follow_up)
         else:
             print(f"\n❌ Ошибка установки канала с {data['from']}")
+
+    def _handle_handshake_complete(self, data: dict, addr: tuple):
+        """Обработка финального сообщения handshake, регистрируем маппинг"""
+        ok = self.handshake.handle_complete(data)
+        if ok:
+            print(f"   ✅ Маппинг зарегистрирован (HANDSHAKE_COMPLETE)")
+        else:
+            print(f"   ❌ Не удалось зарегистрировать маппинг")
 
     def _handle_secure_message(self, data: dict, addr: tuple):
         """Обработка защищённого сообщения"""

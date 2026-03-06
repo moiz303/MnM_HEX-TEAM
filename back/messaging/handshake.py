@@ -9,8 +9,8 @@ from typing import Dict, Optional, Tuple
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
 
-from back.core.crypto import SecureCryptoCore
-from back.network.protocols import MessageType
+from core.crypto import SecureCryptoCore
+from network.protocols import MessageType
 
 
 class HandshakeManager:
@@ -136,7 +136,7 @@ class HandshakeManager:
 
         return response
 
-    def handle_response(self, data: dict) -> Tuple[bool, Optional[str]]:
+    def handle_response(self, data: dict) -> Tuple[bool, Optional[str], Optional[dict]]:
         """
         Обработать ответ на handshake
 
@@ -171,10 +171,14 @@ class HandshakeManager:
         print(f"  ✅ Подпись пира {peer_name} верна")
 
         # ВАЖНО: Завершаем создание сессии и ПЕРЕДАЁМ peer_chat_id для маппинга!
+        # Используем ранее сгенерированный приватный эфемерный ключ инициатора,
+        # чтобы вычислить тот же общий секрет (ECDH).
+        my_ephemeral_private = handshake_data.get('ephemeral_private')
         local_chat_id, _ = self.crypto.create_secure_session(
             peer_device,
             peer_ephemeral_bytes,
-            peer_chat_id=peer_chat_id  # Теперь мы знаем chat_id пира!
+            peer_chat_id=peer_chat_id,  # Теперь мы знаем chat_id пира!
+            my_ephemeral_private=my_ephemeral_private
         )
 
         print(f"  ✅ Создана локальная сессия {local_chat_id[:8]}...")
@@ -183,7 +187,49 @@ class HandshakeManager:
         # Очищаем pending
         del self.pending_handshakes[nonce]
 
-        return True, local_chat_id
+        # Формируем follow-up сообщение для информирования пира о нашем
+        # локальном chat_id, чтобы он мог зарегистрировать маппинг на своей стороне.
+        follow_up = {
+            'type': MessageType.HANDSHAKE_COMPLETE,
+            'nonce': nonce,
+            'from': self.username,
+            'device_id': self.crypto.device_id,
+            'chat_id': local_chat_id
+        }
+
+        return True, local_chat_id, follow_up
+
+    def handle_complete(self, data: dict) -> bool:
+        """
+        Обработка сообщения HANDSHAKE_COMPLETE — финальная регистрация маппинга
+
+        Args:
+            data: входные данные
+
+        Returns:
+            bool: успех
+        """
+        nonce = data.get('nonce')
+        remote_chat_id = data.get('chat_id')
+
+        if not nonce or nonce not in self.pending_handshakes:
+            print(f"  ❌ Нет ожидающего handshake для complete nonce {str(nonce)[:8]}...")
+            return False
+
+        handshake_data = self.pending_handshakes[nonce]
+        local_chat_id = handshake_data.get('local_chat_id')
+        if not local_chat_id:
+            print(f"  ❌ Внутренняя ошибка: нет local_chat_id для nonce {nonce[:8]}...")
+            return False
+
+        # Регистрируем маппинг в crypto
+        self.crypto.register_chat_mapping(local_chat_id, remote_chat_id)
+
+        # Удаляем pending
+        del self.pending_handshakes[nonce]
+
+        print(f"  ✅ HANDSHAKE_COMPLETE обработан: local={local_chat_id[:8]} <-> remote={remote_chat_id[:8]}")
+        return True
 
     def cleanup_old(self, max_age: float = 30.0):
         """Очистка старых handshake"""
