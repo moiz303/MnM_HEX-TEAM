@@ -26,42 +26,37 @@ class HandshakeManager:
         """
         Инициировать handshake с пиром
         """
-        # Генерируем эфемерную ключевую пару
         ephemeral_private = ec.generate_private_key(ec.SECP384R1())
         ephemeral_public = ephemeral_private.public_key()
 
-        # Генерируем nonce
-        nonce = secrets.token_hex(8)
+        # Получаем байты ключа (ВАЖНО: в том же формате, что при проверке)
+        key_bytes = ephemeral_public.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
 
-        # Создаём handshake сообщение
-        handshake = {
-            'type': MessageType.HANDSHAKE_INIT,
-            'nonce': nonce,
-            'from': peer_name,
-            'device_id': peer_device_id,
-            'ephemeral_public': base64.b64encode(
-                ephemeral_public.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                )
-            ).decode(),
-            'signature': base64.b64encode(
-                self.crypto.sign_data(ephemeral_public.public_bytes(
-                    encoding=serialization.Encoding.DER,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                ))
-            ).decode()
-        }
+        # Подписываем байты ключа
+        signature = self.crypto.sign_data(key_bytes)
+
+        nonce = secrets.token_hex(8)
 
         # Сохраняем для завершения handshake
         self.pending_handshakes[nonce] = {
             'peer': peer_name,
             'peer_ip': peer_ip,
             'ephemeral_private': ephemeral_private,
+            'key_bytes': key_bytes,  # Сохраняем байты для проверки
             'timestamp': time.time()
         }
 
-        return handshake
+        return {
+            'type': 'handshake_init',
+            'nonce': nonce,
+            'from': peer_name,
+            'device_id': peer_device_id,
+            'ephemeral_public': base64.b64encode(key_bytes).decode(),
+            'signature': base64.b64encode(signature).decode()
+        }
 
     def handle_initiation(self, data: dict, addr: tuple) -> Optional[dict]:
         """
