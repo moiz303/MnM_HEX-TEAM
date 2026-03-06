@@ -11,11 +11,16 @@ import base64
 
 from core.crypto import SecureCryptoCore
 from core.exceptions import CryptoError
+
 from network.discovery import PeerDiscovery
 from network.connection import ConnectionManager
-from network.protocols import MessageType, Intervals
+from network.protocols import MessageType
+
 from storage.database import SecureDatabase
+
 from messaging.handshake import HandshakeManager
+
+from api import LocalAPI
 
 
 class SecureMessenger:
