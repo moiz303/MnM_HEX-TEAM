@@ -127,8 +127,29 @@ class SecureMessenger:
         if response:
             print(f"   ✅ Отправляем ответ на handshake")
             self.connection.send_to_peer(addr[0], response)
-        else:
-            print(f"   ❌ Ошибка обработки handshake")
+            return
+
+        # Если подпись недействительна, возможно у нас ещё нет
+        # публичного ключа пира из discovery. Попробуем загрузить
+        # публичный ключ по IP и повторить верификацию.
+        try:
+            peer_info = self.discovery.get_all_peers().get(addr[0])
+            if peer_info and peer_info.get('public_key'):
+                print(f"   ⚠️ Попытка загрузить публичный ключ пира из discovery ({addr[0]}) и повторить")
+                try:
+                    pub_bytes = base64.b64decode(peer_info.get('public_key'))
+                    if self.crypto.verify_peer_identity(peer_info.get('device_id'), pub_bytes):
+                        response = self.handshake.handle_initiation(data, addr)
+                        if response:
+                            print(f"   ✅ Отправляем ответ на handshake (после загрузки ключа)")
+                            self.connection.send_to_peer(addr[0], response)
+                            return
+                except Exception as e:
+                    print(f"   ❌ Ошибка загрузки ключа из discovery: {e}")
+        except Exception:
+            pass
+
+        print(f"   ❌ Ошибка обработки handshake")
 
     def _handle_handshake_response(self, data: dict, addr: tuple):
         """Обработка ответа на handshake"""
@@ -143,8 +164,31 @@ class SecureMessenger:
             if follow_up:
                 print(f"   ✅ Отправляем HANDSHAKE_COMPLETE для финализации маппинга")
                 self.connection.send_to_peer(addr[0], follow_up)
-        else:
-            print(f"\n❌ Ошибка установки канала с {data['from']}")
+            return
+
+        # Retry: try to load peer public key from discovery (maybe handshake
+        # arrived before discovery broadcast) and retry handling response.
+        try:
+            peer_info = self.discovery.get_all_peers().get(addr[0])
+            if peer_info and peer_info.get('public_key'):
+                print(f"   ⚠️ Попытка загрузить публичный ключ пира из discovery ({addr[0]}) и повторить обработку response")
+                try:
+                    pub_bytes = base64.b64decode(peer_info.get('public_key'))
+                    if self.crypto.verify_peer_identity(peer_info.get('device_id'), pub_bytes):
+                        success, chat_id, follow_up = self.handshake.handle_response(data)
+                        if success:
+                            peer_name = data['from']
+                            self.active_chats[peer_name] = chat_id
+                            print(f"\n✅ Защищённый канал с {peer_name} установлен (после загрузки ключа)!")
+                            if follow_up:
+                                self.connection.send_to_peer(addr[0], follow_up)
+                            return
+                except Exception as e:
+                    print(f"   ❌ Ошибка загрузки ключа из discovery: {e}")
+        except Exception:
+            pass
+
+        print(f"\n❌ Ошибка установки канала с {data['from']}")
 
     def _handle_handshake_complete(self, data: dict, addr: tuple):
         """Обработка финального сообщения handshake, регистрируем маппинг"""

@@ -35,6 +35,7 @@ let selectedFiles = []; // array of {file, uid}
 let callTimer = null;
 let callSeconds = 0;
 let localStream = null;
+let messagesPollInterval = null;
 
 const peersList = document.getElementById('peers-list');
 const messagesArea = document.getElementById('messages-area');
@@ -209,6 +210,35 @@ async function selectPeerByUsername(username) {
 
     renderMessages();
     messagesArea.querySelector('.empty-state')?.remove();
+
+    // start polling messages for this peer
+    if (messagesPollInterval) clearInterval(messagesPollInterval);
+    messagesPollInterval = setInterval(async () => {
+        try {
+            const url = new URL('/api/get_messages', window.location.origin);
+            url.searchParams.set('peer', activePeer.username);
+            const r = await fetch(url);
+            if (!r.ok) return;
+            const data = await r.json();
+            const mapped = (data.messages || []).map(m => ({
+                id: m.msg_id || `${m.timestamp}_${Math.random()}`,
+                text: m.text || '',
+                time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+                sent: m.from === 'me'
+            }));
+
+            // merge deduplicated (by id)
+            const existing = messages[activePeer.username] || [];
+            const existingIds = new Set(existing.map(x => x.id));
+            const merged = existing.concat(mapped.filter(x => !existingIds.has(x.id)));
+            // sort by time (we store in chronological order)
+            merged.sort((a, b) => a.time.localeCompare(b.time));
+            messages[activePeer.username] = merged;
+            renderMessages();
+        } catch (e) {
+            // ignore polling errors
+        }
+    }, 2000);
 }
 
 function updateHeader() {
