@@ -12,3 +12,5 @@ back/network/__pycache__/discovery.cpython-314.pyc
 back/network/__pycache__/protocols.cpython-314.pyc
 back/storage/__pycache__/__init__.cpython-314.pyc
 back/storage/__pycache__/database.cpython-314.pyc
+back/__pycache__/main.cpython-314.pyc
+

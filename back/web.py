@@ -17,8 +17,43 @@ def create_app():
     app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
     CORS(app)
 
-    # Start backend messenger and local API in background threads
-    messenger = SecureMessenger('web_user')
+    # Start backend messenger and local API in background threads.
+    # If SecureMessenger fails (e.g. network port already in use), fall back to a minimal mock backend
+    try:
+        messenger = SecureMessenger('web_user')
+    except Exception as e:
+        print(f"[web] Warning: SecureMessenger failed to start: {e}")
+
+        class MockBackend:
+            def __init__(self):
+                self.username = 'web_user'
+                self.device_id = 'mock-device'
+                self.start_time = time.time()
+                self.active_chats = {}
+                self.db = self
+                self.discovery = self
+
+            # discovery methods
+            def get_all_peers(self):
+                # return empty dict (no peers)
+                return {}
+
+            def get_peer_by_name(self, name):
+                return None
+
+            # chat methods
+            def start_chat(self, peer_name):
+                return False
+
+            def send_message(self, peer_name, text):
+                return False
+
+            # db stub
+            def get_conversation(self, chat_id, limit=50):
+                return []
+
+        messenger = MockBackend()
+
     local_api = LocalAPI(messenger)
     threading.Thread(target=local_api.start, daemon=True).start()
 
