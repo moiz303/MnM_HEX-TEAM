@@ -1,76 +1,101 @@
+#!/usr/bin/env python3
 """
 Secure P2P Messenger
-Главный файл - объединяет все модули
+Главный файл - поддерживает и GUI, и консольный режим
 """
+
 import sys
 import time
 import hashlib
 import socket
-import json
 import base64
+import threading
+import cmd
+import json
+from typing import Optional
 
 from core.crypto import SecureCryptoCore
 from core.exceptions import CryptoError
-
 from network.discovery import PeerDiscovery
 from network.connection import ConnectionManager
-from network.protocols import MessageType
-
+from network.protocols import MessageType, Limits, Timeouts
 from storage.database import SecureDatabase
-
 from messaging.handshake import HandshakeManager
-
-from api import LocalAPI
 
 
 class SecureMessenger:
     """
-    Главный класс приложения
+    Главный класс мессенджера
     """
+
     def __init__(self, username: str):
         self.username = username
+        self.start_time = time.time()
+
+        # Генерируем device_id из имени и hostname
         self.device_id = hashlib.sha256(
             f"{username}{socket.gethostname()}".encode()
         ).hexdigest()[:16]
 
-        print(f"[*] Инициализация криптографического ядра...")
+        print(f"\n🚀 Запуск Secure P2P Messenger")
+        print(f"   Пользователь: {username}")
+        print(f"   Device ID: {self.device_id}")
+        print(f"   Время: {time.strftime('%H:%M:%S')}")
+
+        # Криптоядро
+        print(f"\n🔐 Инициализация криптографического ядра...")
         self.crypto = SecureCryptoCore(self.device_id)
 
-        print(f"[*] Подготовка публичного ключа...")
-        pub_key_b64 = base64.b64encode(
-            self.crypto.get_identity_public_bytes()
-        ).decode()
+        # Получаем публичный ключ в base64 для передачи
+        pub_key_bytes = self.crypto.get_identity_public_bytes()
+        self.public_key_b64 = base64.b64encode(pub_key_bytes).decode()
+        print(f"   Публичный ключ: {len(pub_key_bytes)} байт")
+        print(f"   Base64: {self.public_key_b64[:50]}...")
 
-        print(f"[*] Запуск обнаружения пиров...")
-        self.discovery = PeerDiscovery(username, self.device_id, pub_key_b64)
+        # Обнаружение пиров
+        print(f"\n📡 Запуск обнаружения пиров...")
+        self.discovery = PeerDiscovery(
+            username=self.username,
+            device_id=self.device_id,
+            public_key_b64=self.public_key_b64
+        )
         self.discovery.on_peer_found = self._on_peer_found
         self.discovery.start()
 
-        print(f"[*] Запуск менеджера соединений...")
+        # Менеджер соединений
+        print(f"🔌 Запуск менеджера соединений...")
         self.connection = ConnectionManager()
         self.connection.start(self._on_message)
 
-        print(f"[*] Инициализация базы данных...")
+        # База данных
+        print(f"💾 Инициализация базы данных...")
         self.db = SecureDatabase()
 
-        print(f"[*] Подготовка handshake-менеджера...")
+        # Handshake менеджер
+        print(f"🤝 Инициализация handshake менеджера...")
         self.handshake = HandshakeManager(self.crypto, self.username)
 
-        # Активные чаты: peer_name -> chat_id
+        # Активные чаты: peer_name -> local_chat_id
         self.active_chats = {}
 
         print(f"\n✅ {username} готов к работе!\n")
 
     def _on_peer_found(self, ip: str, info: dict):
         """Колбэк при обнаружении нового пира"""
-        print(f"\n[+] Найден пир: {info['username']} ({ip})")
+        print(f"\n📢 Найден пир: {info['username']} ({ip})")
+        print(f"   Device ID: {info['device_id']}")
+        print(f"   Последняя активность: {time.strftime('%H:%M:%S', time.localtime(info['last_seen']))}")
 
-        # Сохраняем публичный ключ
+        # Сохраняем публичный ключ пира
         if info.get('public_key'):
-            self.crypto.verify_peer_identity(
-                info['device_id'],
-                base64.b64decode(info['public_key'])
-            )
+            try:
+                pub_key_bytes = base64.b64decode(info['public_key'])
+                if self.crypto.verify_peer_identity(info['device_id'], pub_key_bytes):
+                    print(f"   ✅ Ключ пира сохранён")
+                else:
+                    print(f"   ❌ Ошибка сохранения ключа")
+            except Exception as e:
+                print(f"   ❌ Ошибка обработки ключа: {e}")
 
     def _on_message(self, data: dict, addr: tuple):
         """Колбэк при получении сообщения"""
@@ -78,21 +103,33 @@ class SecureMessenger:
 
         try:
             if msg_type == MessageType.HANDSHAKE_INIT:
+                print(f"\n📥 Получен handshake INIT от {addr[0]}")
                 self._handle_handshake_init(data, addr)
+
             elif msg_type == MessageType.HANDSHAKE_RESPONSE:
+                print(f"\n📥 Получен handshake RESPONSE от {addr[0]}")
                 self._handle_handshake_response(data, addr)
+
             elif msg_type == MessageType.SECURE_MESSAGE:
+                print(f"\n📥 Получено SECURE MESSAGE от {addr[0]}")
                 self._handle_secure_message(data, addr)
+
             else:
-                print(f"\n[?] Неизвестный тип сообщения: {msg_type}")
+                print(f"\n❓ Неизвестный тип сообщения: {msg_type}")
+
         except Exception as e:
-            print(f"\n[!] Ошибка обработки сообщения: {e}")
+            print(f"\n❌ Ошибка обработки сообщения: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _handle_handshake_init(self, data: dict, addr: tuple):
         """Обработка handshake инициации"""
         response = self.handshake.handle_initiation(data, addr)
         if response:
+            print(f"   ✅ Отправляем ответ на handshake")
             self.connection.send_to_peer(addr[0], response)
+        else:
+            print(f"   ❌ Ошибка обработки handshake")
 
     def _handle_handshake_response(self, data: dict, addr: tuple):
         """Обработка ответа на handshake"""
@@ -100,14 +137,16 @@ class SecureMessenger:
         if success:
             peer_name = data['from']
             self.active_chats[peer_name] = chat_id
-            print(f"\n[✓] Защищённый канал с {peer_name} установлен!")
+            print(f"\n✅ Защищённый канал с {peer_name} установлен!")
+            print(f"   Локальный chat_id: {chat_id[:8]}...")
+        else:
+            print(f"\n❌ Ошибка установки канала с {data['from']}")
 
     def _handle_secure_message(self, data: dict, addr: tuple):
         """Обработка защищённого сообщения"""
         encrypted = data['encrypted']
-        chat_id =  data['chat_id']
 
-        # Определяем отправителя
+        # Определяем отправителя по IP
         sender = None
         for ip, info in self.discovery.get_all_peers().items():
             if ip == addr[0]:
@@ -115,150 +154,293 @@ class SecureMessenger:
                 break
 
         if not sender:
-            print(f"[!] Неизвестный отправитель {addr[0]}")
+            print(f"   ❌ Неизвестный отправитель {addr[0]}")
             return
 
         try:
-            # Расшифровываем - функция сама найдёт правильную сессию
+            # Расшифровываем сообщение
             decrypted = self.crypto.decrypt_message(encrypted, sender)
-            print(f"\n[{sender}]: {decrypted['content']}")
+            print(f"\n💬 [{sender}]: {decrypted['content']}")
 
             # Сохраняем в историю
-            self.db.add_message(
-                decrypted.get('msg_id', 'unknown'),
-                chat_id,
-                sender,
-                json.dumps(encrypted).encode(),
-                'incoming'
-            )
+            msg_id = hashlib.sha256(
+                f"{sender}{decrypted['timestamp']}{decrypted['content']}".encode()
+            ).hexdigest()[:16]
+
+            # Здесь нужно сохранить в БД
+            # self.db.add_message(...)
 
         except CryptoError as e:
-            print(f"\n[!] Ошибка расшифровки: {e}")
+            print(f"\n❌ Ошибка расшифровки: {e}")
 
-    def start_chat(self, peer_name: str):
+    def start_chat(self, peer_name: str) -> bool:
         """Начать чат с пиром"""
+        print(f"\n🔐 Начинаем чат с {peer_name}...")
+
+        # Ищем пира
         peer = self.discovery.get_peer_by_name(peer_name)
         if not peer:
-            print(f"[-] Пир {peer_name} не найден")
+            print(f"❌ Пир {peer_name} не найден")
             return False
 
         ip, info = peer
+        print(f"   IP: {ip}")
+        print(f"   Device ID: {info['device_id']}")
 
+        # Создаём handshake сообщение
         handshake_msg = self.handshake.initiate(
             peer_name, ip, info['device_id']
         )
 
+        # Отправляем
         if self.connection.send_to_peer(ip, handshake_msg):
-            print(f"[*] Устанавливаем соединение с {peer_name}...")
+            print(f"   ✅ Handshake отправлен")
             return True
         else:
-            print(f"[-] {peer_name} не отвечает")
+            print(f"   ❌ {peer_name} не отвечает")
             return False
 
     def send_message(self, peer_name: str, text: str) -> bool:
         """Отправить сообщение"""
         if peer_name not in self.active_chats:
-            print(f"[-] Нет активного чата с {peer_name}")
+            print(f"❌ Нет активного чата с {peer_name}")
             return False
 
-        local_chat_id = self.active_chats[peer_name]  # Это локальный chat_id
+        local_chat_id = self.active_chats[peer_name]
 
         # Находим пира
         peer = self.discovery.get_peer_by_name(peer_name)
         if not peer:
-            print(f"[-] {peer_name} не в сети")
+            print(f"❌ {peer_name} не в сети")
             return False
 
         ip, info = peer
 
-        # Шифруем сообщение (используем локальный chat_id)
-        encrypted = self.crypto.encrypt_message(local_chat_id, text, self.username)
+        try:
+            # Шифруем сообщение
+            encrypted = self.crypto.encrypt_message(local_chat_id, text, self.username)
 
-        # Отправляем пиру
-        message = {
-            'type': MessageType.SECURE_MESSAGE,
-            'encrypted': encrypted  # В encrypted уже есть remote_chat_id для пира
-        }
+            # Отправляем
+            message = {
+                'type': MessageType.SECURE_MESSAGE,
+                'encrypted': encrypted
+            }
 
-        if self.connection.send_to_peer(ip, message):
-            print(f"[→] {peer_name}: {text}")
-            return True
-        return False
+            if self.connection.send_to_peer(ip, message):
+                print(f"   ✅ {peer_name}: {text}")
+                return True
+            else:
+                print(f"   ❌ Не удалось отправить")
+                return False
+
+        except CryptoError as e:
+            print(f"   ❌ Ошибка шифрования: {e}")
+            return False
 
     def list_peers(self):
         """Показать активных пиров"""
         peers = self.discovery.get_all_peers()
         if not peers:
-            print("[-] Нет активных пиров")
+            print("📭 Нет активных пиров")
             return
 
-        print("\nАктивные пиры:")
+        print("\n📋 Активные пиры:")
+        print("-" * 60)
         for ip, info in peers.items():
             age = time.time() - info['last_seen']
             if age < 30:
-                status = "🟢"
+                status = "🟢 ONLINE"
             elif age < 120:
-                status = "🟡"
+                status = "🟡 AWAY"
             else:
-                status = "⚫"
+                status = "⚫ OFFLINE"
 
-            chat_status = "💬" if info['username'] in self.active_chats else ""
-            print(f"  {status} {info['username']} {chat_status} ({ip})")
+            chat_mark = "💬" if info['username'] in self.active_chats else ""
+            print(f"  {status} {info['username']} {chat_mark}")
+            print(f"     IP: {ip}")
+            print(f"     Device: {info['device_id'][:8]}...")
+            print(f"     Last seen: {age:.0f} сек назад")
+            if info['username'] in self.active_chats:
+                chat_id = self.active_chats[info['username']]
+                print(f"     Chat ID: {chat_id[:8]}...")
+        print("-" * 60)
 
-    def run(self):
-        """Запуск командного интерфейса"""
-        print("Команды:")
-        print("  /list           - показать пиров")
-        print("  /chat <имя>     - начать чат")
-        print("  /send <имя> <т> - отправить сообщение")
-        print("  /exit           - выход")
+    def peer_info(self, peer_name: str):
+        """Информация о пире"""
+        peer = self.discovery.get_peer_by_name(peer_name)
+        if not peer:
+            print(f"❌ Пир {peer_name} не найден")
+            return
 
-        while True:
-            try:
-                cmd = input("\n> ").strip()
+        ip, info = peer
+        age = time.time() - info['last_seen']
 
-                if cmd == "/list":
-                    self.list_peers()
+        print(f"\n👤 Информация о {peer_name}:")
+        print("-" * 60)
+        print(f"   IP: {ip}")
+        print(f"   Device ID: {info['device_id']}")
+        print(f"   Порт: {info.get('port', 37021)}")
+        print(f"   Последняя активность: {age:.0f} сек назад")
+        print(f"   Статус чата: {'✅ активен' if peer_name in self.active_chats else '❌ нет'}")
+        if peer_name in self.active_chats:
+            chat_id = self.active_chats[peer_name]
+            print(f"   Локальный chat_id: {chat_id}")
 
-                elif cmd.startswith("/chat "):
-                    name = cmd[6:].strip()
-                    self.start_chat(name)
+        # Информация о ключе
+        if 'public_key' in info:
+            print(f"   Публичный ключ: {info['public_key'][:50]}...")
+        print("-" * 60)
 
-                elif cmd.startswith("/send "):
-                    parts = cmd.split(" ", 2)
-                    if len(parts) < 3:
-                        print("Использование: /send <имя> <текст>")
-                        continue
-                    _, name, text = parts
-                    self.send_message(name, text)
-
-                elif cmd == "/exit":
-                    break
-
-                elif cmd:
-                    print("Неизвестная команда")
-
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                print(f"Ошибка: {e}")
-
-        self.cleanup()
+    def my_info(self):
+        """Информация о себе"""
+        print(f"\n👤 Моя информация:")
+        print("-" * 60)
+        print(f"   Имя: {self.username}")
+        print(f"   Device ID: {self.device_id}")
+        print(f"   Публичный ключ (base64): {self.public_key_b64[:50]}...")
+        print(f"   Время работы: {(time.time() - self.start_time):.0f} сек")
+        print(f"   Активных чатов: {len(self.active_chats)}")
+        print(f"   Известных пиров: {len(self.discovery.get_all_peers())}")
+        print("-" * 60)
 
     def cleanup(self):
         """Очистка ресурсов"""
-        print("\n[*] Завершение работы...")
+        print("\n🧹 Очистка ресурсов...")
         self.discovery.stop()
         self.connection.stop()
+        print("✅ Завершено")
+
+
+class ConsoleFrontend(cmd.Cmd):
+    """
+    Консольный интерфейс для тестирования
+    """
+
+    intro = """
+Команды:
+  peers              - показать список пиров
+  chat <имя>         - начать чат с пиром
+  send <имя> <текст> - отправить сообщение
+  info [имя]         - информация о себе или пире
+  myinfo             - информация о себе
+  exit               - выход
+
+Для автодополнения используйте TAB
+"""
+    prompt = '> '
+
+    def __init__(self, messenger: SecureMessenger):
+        super().__init__()
+        self.messenger = messenger
+        self.running = True
+
+    def do_peers(self, arg):
+        """Показать список пиров"""
+        self.messenger.list_peers()
+
+    def do_chat(self, arg):
+        """Начать чат с пиром: chat <имя>"""
+        if not arg:
+            print("❌ Укажите имя пира: chat <имя>")
+            return
+
+        self.messenger.start_chat(arg.strip())
+
+    def do_send(self, arg):
+        """Отправить сообщение: send <имя> <текст>"""
+        parts = arg.split(' ', 1)
+        if len(parts) < 2:
+            print("❌ Использование: send <имя> <текст>")
+            return
+
+        name, text = parts
+        self.messenger.send_message(name.strip(), text.strip())
+
+    def do_info(self, arg):
+        """Информация о пире: info <имя>"""
+        if not arg:
+            self.messenger.my_info()
+        else:
+            self.messenger.peer_info(arg.strip())
+
+    def do_myinfo(self, arg):
+        """Информация о себе"""
+        self.messenger.my_info()
+
+    def do_exit(self, arg):
+        """Выход из программы"""
+        print("👋 Завершение работы...")
+        self.messenger.cleanup()
+        return True
+
+    def do_EOF(self, arg):
+        """Ctrl-D для выхода"""
+        return self.do_exit(arg)
+
+    # Автодополнение
+    def complete_chat(self, text, line, begidx, endidx):
+        peers = self.messenger.discovery.get_all_peers()
+        names = [info['username'] for info in peers.values()]
+        return [name for name in names if name.startswith(text)]
+
+    def complete_info(self, text, line, begidx, endidx):
+        return self.complete_chat(text, line, begidx, endidx)
+
+    def complete_send(self, text, line, begidx, endidx):
+        parts = line.split()
+        if len(parts) <= 2:
+            return self.complete_chat(text, line, begidx, endidx)
+        return []
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Использование: python main.py <имя_пользователя>")
+        print("Использование:")
+        print("  python main.py <имя>              # Консольный режим")
+        print("  python main.py <имя> --peers      # Показать пиров и выйти")
+        print("  python main.py <имя> --chat <peer> # Начать чат")
+        print("  python main.py <имя> --send <peer> <текст> # Отправить сообщение")
         sys.exit(1)
 
-    messenger = SecureMessenger(sys.argv[1])
-    messenger.run()
+    username = sys.argv[1]
+
+    # Создаём мессенджер
+    messenger = SecureMessenger(username)
+
+    # Даём время на обнаружение пиров
+    print("\n⏳ Ожидание обнаружения пиров (3 сек)...")
+    time.sleep(3)
+
+    if len(sys.argv) == 2:
+        # Консольный режим
+        console = ConsoleFrontend(messenger)
+        try:
+            console.cmdloop()
+        except KeyboardInterrupt:
+            print("\n\n👋 Пока!")
+        finally:
+            messenger.cleanup()
+
+    else:
+        # Режим одной команды
+        mode = sys.argv[2]
+
+        if mode == "--peers":
+            messenger.list_peers()
+
+        elif mode == "--chat" and len(sys.argv) > 3:
+            messenger.start_chat(sys.argv[3])
+            time.sleep(2)  # Ждём handshake
+
+        elif mode == "--send" and len(sys.argv) > 4:
+            peer = sys.argv[3]
+            text = sys.argv[4]
+            messenger.send_message(peer, text)
+
+        else:
+            print("❌ Неверные аргументы")
+
+        messenger.cleanup()
 
 
 if __name__ == "__main__":
