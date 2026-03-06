@@ -1,0 +1,14 @@
+back/secure_chat.db
+back/__pycache__/api.cpython-314.pyc
+back/core/__pycache__/__init__.cpython-314.pyc
+back/core/__pycache__/crypto.cpython-314.pyc
+back/core/__pycache__/exceptions.cpython-314.pyc
+back/core/__pycache__/secure_memory.cpython-314.pyc
+back/messaging/__pycache__/__init__.cpython-314.pyc
+back/messaging/__pycache__/handshake.cpython-314.pyc
+back/network/__pycache__/__init__.cpython-314.pyc
+back/network/__pycache__/connection.cpython-314.pyc
+back/network/__pycache__/discovery.cpython-314.pyc
+back/network/__pycache__/protocols.cpython-314.pyc
+back/storage/__pycache__/__init__.cpython-314.pyc
+back/storage/__pycache__/database.cpython-314.pyc
