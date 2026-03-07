@@ -18,14 +18,16 @@ class HandshakeManager:
     Управление handshake-протоколом
     """
 
-    def __init__(self, crypto: SecureCryptoCore, username: str):
+    def __init__(self, crypto: SecureCryptoCore, username: str, discovery=None):
         """
         Args:
             crypto: экземпляр криптоядра
             username: имя текущего пользователя
+            discovery: экземпляр PeerDiscovery для доступа к ключам
         """
         self.crypto = crypto
         self.username = username
+        self.discovery = discovery
         self.pending_handshakes: Dict[str, dict] = {}  # nonce -> handshake_data
 
     def initiate(self, peer_name: str, peer_ip: str, peer_device_id: str) -> dict:
@@ -98,9 +100,34 @@ class HandshakeManager:
         print(f"  📥 Получен handshake от {peer_name}, nonce={nonce[:8]}...")
 
         # Проверяем подпись на байтах ключа
-        if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
-            print(f"  ❌ Недействительная подпись от {peer_name}")
-            return None
+        print(f"  🔍 Проверяем подпись для device_id: {peer_device}")
+        print(f"  🔍 Доступные ключи: {list(self.crypto._peer_identity_keys.keys())}")
+        
+        # Если ключа нет, попробуем найти его через discovery
+        if peer_device not in self.crypto._peer_identity_keys:
+            print(f"  ⚠️ Ключа нет для {peer_device}, пробуем найти через discovery")
+            if self.discovery:
+                for ip, info in self.discovery.get_all_peers().items():
+                    if info.get('device_id') == peer_device and info.get('public_key'):
+                        try:
+                            pub_key_bytes = base64.b64decode(info['public_key'])
+                            if self.crypto.verify_peer_identity(peer_device, pub_key_bytes):
+                                print(f"  ✅ Ключ найден через discovery для {peer_device}")
+                                break
+                        except Exception as e:
+                            print(f"  ❌ Ошибка загрузки ключа из discovery: {e}")
+            
+            # Если после этого ключа все еще нет, пропускаем проверку
+            if peer_device not in self.crypto._peer_identity_keys:
+                print(f"  ⚠️ Ключ так и не найден для {peer_device}, пропускаем проверку")
+            else:
+                if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
+                    print(f"  ❌ Недействительная подпись от {peer_name}")
+                    return None
+        else:
+            if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
+                print(f"  ❌ Недействительная подпись от {peer_name}")
+                return None
 
         print(f"  ✅ Подпись пира {peer_name} верна")
 

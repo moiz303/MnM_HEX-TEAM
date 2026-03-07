@@ -69,7 +69,7 @@ class SecureMessenger:
 
         # Handshake менеджер
         print(f"🤝 Инициализация handshake менеджера...")
-        self.handshake = HandshakeManager(self.crypto, self.username)
+        self.handshake = HandshakeManager(self.crypto, self.username, self.discovery)
 
         # Активные чаты: peer_name -> local_chat_id
         self.active_chats = {}
@@ -86,12 +86,15 @@ class SecureMessenger:
         if info.get('public_key'):
             try:
                 pub_key_bytes = base64.b64decode(info['public_key'])
+                print(f"  🔍 Пытаемся сохранить ключ для device_id: {info['device_id']}")
                 if self.crypto.verify_peer_identity(info['device_id'], pub_key_bytes):
                     print(f"   ✅ Ключ пира сохранён")
                 else:
                     print(f"   ❌ Ошибка сохранения ключа")
             except Exception as e:
                 print(f"   ❌ Ошибка обработки ключа: {e}")
+        else:
+            print(f"   ⚠️ Нет публичного ключа у пира")
 
     def _on_message(self, data: dict, addr: tuple):
         """Колбэк при получении сообщения"""

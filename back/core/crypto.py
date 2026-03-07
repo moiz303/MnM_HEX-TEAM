@@ -92,6 +92,9 @@ class SecureCryptoCore:
 
     def verify_signature(self, data: bytes, signature: bytes, peer_id: str) -> bool:
         """Проверить подпись пира"""
+        print(f"  🔍 Проверяем подпись для peer_id: {peer_id}")
+        print(f"  🔍 Доступные ключи в crypto: {list(self._peer_identity_keys.keys())}")
+        
         if peer_id not in self._peer_identity_keys:
             print(f"  ⚠️ Нет публичного ключа для {peer_id}")
             return False
@@ -102,6 +105,7 @@ class SecureCryptoCore:
                 data,
                 ec.ECDSA(hashes.SHA256())
             )
+            print(f"  ✅ Подпись верна для {peer_id}")
             return True
         except InvalidSignature as e:
             print(f"  ⚠️ Недействительная подпись: {e}")

@@ -205,16 +205,28 @@ def create_app():
                     # Используем IP для start_chat, но сохраняем chat_id для username
                     ok = messenger.start_chat(ip or username)
                     if ok:
+                        # Ждем больше времени для handshake
+                        import time
+                        time.sleep(5)
+                        
+                        # Debug: покажем все active_chats
+                        print(f"[DEBUG] Active chats after handshake: {messenger.active_chats}")
+                        
                         # Ищем chat_id в active_chats
                         chat_id = None
                         for key, value in messenger.active_chats.items():
+                            print(f"[DEBUG] Checking key: {key}, value: {value}")
                             if key == ip or key == username:
                                 chat_id = value
+                                print(f"[DEBUG] Found chat_id: {chat_id}")
                                 break
                         
                         # Если нашли chat_id, сохраняем его и для username
                         if chat_id and username:
                             messenger.active_chats[username] = chat_id
+                            print(f"[DEBUG] Saved chat_id for username: {username}")
+                        else:
+                            print(f"[DEBUG] No chat_id found for ip={ip}, username={username}")
                         
                         return {'status': 'handshake_initiated', 'chat_id': chat_id}, 200
                     else:
