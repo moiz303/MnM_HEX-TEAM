@@ -574,22 +574,29 @@ function sendMessage() {
 
     // Send to backend
     if (text) {
+        console.log('[DEBUG] Sending message:', { peer: activePeer.username, text });
         fetch('/api/send_message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ peer: activePeer.username, text })
         })
-        .then(response => response.json())
+        .then(response => {
+            console.log('[DEBUG] Send response status:', response.status);
+            return response.json();
+        })
         .then(result => {
+            console.log('[DEBUG] Send response result:', result);
             if (result.status === 'sent') {
                 console.log('Message sent successfully:', result);
                 // Update the last message with sent status and timestamp
                 const msgList = messages[activePeer.username];
+                console.log('[DEBUG] Current messages list:', msgList);
                 if (msgList && msgList.length > 0) {
                     // Find the most recent message with 'sending' status
                     for (let i = msgList.length - 1; i >= 0; i--) {
                         const msg = msgList[i];
                         if (msg.text === text && msg.sent && msg.status === 'sending') {
+                            console.log('[DEBUG] Found message to update:', msg);
                             msg.timestamp = result.timestamp;
                             msg.status = 'sent';
                             msg.id = `sent_${result.timestamp}`;
@@ -597,6 +604,7 @@ function sendMessage() {
                         }
                     }
                 }
+                console.log('[DEBUG] Messages after update:', messages[activePeer.username]);
                 renderMessages(); // Re-render to update status
                 saveMessagesToStorage(activePeer.username); // Save to localStorage
                 // Trigger a message poll to get updated messages
