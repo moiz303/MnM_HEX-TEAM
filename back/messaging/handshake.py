@@ -75,35 +75,31 @@ class HandshakeManager:
             'from': self.username,
             'device_id': self.crypto.device_id,
             'ephemeral_public': base64.b64encode(key_bytes).decode(),
+            'identity_public': base64.b64encode(self.crypto.get_identity_public_bytes()).decode(),
             'signature': base64.b64encode(signature).decode()
         }
 
     def handle_initiation(self, data: dict, addr: tuple) -> Optional[dict]:
-        """
-        Обработать входящий handshake
-
-        Args:
-            data: данные запроса
-            addr: адрес отправителя
-
-        Returns:
-            Optional[dict]: ответное сообщение или None при ошибке
-        """
         peer_name = data['from']
         peer_device = data['device_id']
         nonce = data['nonce']
 
-        # Получаем байты ключа пира
         peer_ephemeral_bytes = base64.b64decode(data['ephemeral_public'])
         signature = base64.b64decode(data['signature'])
 
         print(f"  📥 Получен handshake от {peer_name}, nonce={nonce[:8]}...")
-
-        # Проверяем подпись на байтах ключа
         print(f"  🔍 Проверяем подпись для device_id: {peer_device}")
         print(f"  🔍 Доступные ключи: {list(self.crypto._peer_identity_keys.keys())}")
-        
-        # Если ключа нет, попробуем найти его через discovery
+
+        if 'identity_public' in data:
+            try:
+                identity_bytes = base64.b64decode(data['identity_public'])
+                self.crypto.verify_peer_identity(peer_device, identity_bytes)
+                print(f"  🔑 Identity ключ зарегистрирован из handshake для {peer_device}")
+            except Exception as e:
+                print(f"  ⚠️ Не удалось зарегистрировать identity из handshake: {e}")
+
+        # Ищем identity-ключ через discovery
         if peer_device not in self.crypto._peer_identity_keys:
             print(f"  ⚠️ Ключа нет для {peer_device}, пробуем найти через discovery")
             if self.discovery:
@@ -116,34 +112,30 @@ class HandshakeManager:
                                 break
                         except Exception as e:
                             print(f"  ❌ Ошибка загрузки ключа из discovery: {e}")
-            
-            # Если после этого ключа все еще нет, пропускаем проверку
-            if peer_device not in self.crypto._peer_identity_keys:
-                print(f"  ⚠️ Ключ так и не найден для {peer_device}, пропускаем проверку")
-            else:
-                if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
-                    print(f"  ❌ Недействительная подпись от {peer_name}")
-                    return None
-        else:
+
+        # Проверяем подпись если ключ есть, иначе пропускаем
+        if peer_device in self.crypto._peer_identity_keys:
             if not self.crypto.verify_signature(peer_ephemeral_bytes, signature, peer_device):
                 print(f"  ❌ Недействительная подпись от {peer_name}")
                 return None
+        else:
+            print(f"  ⚠️ Ключ так и не найден для {peer_device}, пропускаем проверку")
 
         print(f"  ✅ Подпись пира {peer_name} верна")
 
-        # ВАЖНО: Создаём сессию, НО мы ещё не знаем chat_id пира
-        # Поэтому peer_chat_id=None, маппинг будет создан позже
-        print(f"  🔐 Creating secure session with peer_device={peer_device} (initiation)")
-        local_chat_id, response_data = self.crypto.create_secure_session(
-            peer_device,
-            peer_ephemeral_bytes,
-            peer_chat_id=None  # Пока не знаем chat_id пира
-        )
+        if peer_device not in self.crypto._peer_identity_keys:
+            try:
+                peer_pub_key = serialization.load_der_public_key(peer_ephemeral_bytes)
+                self.crypto._peer_identity_keys[peer_device] = peer_pub_key
+                print(f"  🔑 Временный ephemeral identity зарегистрирован для {peer_device}")
+            except Exception as e:
+                print(f"  ❌ Не удалось загрузить ephemeral ключ пира: {e}")
+                return None
 
+        print(f"  🔐 Creating secure session with peer_device={peer_device} (initiation)")
+        local_chat_id, response_data = self.crypto.create_secure_session(peer_device, peer_ephemeral_bytes, peer_chat_id=None)
         print(f"  ✅ Создана локальная сессия {local_chat_id[:8]}...")
 
-        # ВАЖНО: Сохраняем информацию о том, что мы ответили на handshake
-        # Это нужно для связи с отправителем
         self.pending_handshakes[nonce] = {
             'peer_name': peer_name,
             'peer_device': peer_device,
@@ -151,18 +143,15 @@ class HandshakeManager:
             'timestamp': time.time()
         }
 
-        # Формируем ответ
-        response = {
+        return {
             'type': MessageType.HANDSHAKE_RESPONSE,
             'nonce': nonce,
             'from': self.username,
             'device_id': self.crypto.device_id,
-            'chat_id': local_chat_id,  # Отправляем свой chat_id пиру
+            'chat_id': local_chat_id,
             'ephemeral_public': response_data['ephemeral_public'],
             'signature': response_data['signature']
         }
-
-        return response
 
     def handle_response(self, data: dict) -> Tuple[bool, Optional[str], Optional[dict]]:
         """

@@ -67,25 +67,17 @@ class LocalAPI:
         """Запуск локального сервера"""
         self.running = True
 
-        # Удаляем старый сокет, если есть
-        try:
-            os.unlink(SOCKET_PATH)
-        except OSError:
-            pass
-
-        # Создаём Unix Domain Socket
-        self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server_socket.bind(SOCKET_PATH)
+        # Создаём TCP сокет
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.bind(("127.0.0.1", 9999))
         self.server_socket.listen(1)
-
-        # Даём права на чтение/запись (для Android)
-        os.chmod(SOCKET_PATH, 0o666)
 
         # Запускаем потоки
         threading.Thread(target=self._accept_loop, daemon=True).start()
         threading.Thread(target=self._notification_loop, daemon=True).start()
 
-        print(f"[API] Local server started at {SOCKET_PATH}")
+        print(f"[API] Local server started at 127.0.0.1:9999")
 
     def _accept_loop(self):
         """Принимаем подключение от Android-фронтенда"""

@@ -1,13 +1,6 @@
-#!/usr/bin/env python3
-"""
-Start the secure messenger with file transfer for manual testing.
-Run this and then open http://localhost:5000 in your browser.
-"""
-
 import os
 import sys
 import signal
-import time
 
 # Add backend to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'back'))
