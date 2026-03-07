@@ -679,50 +679,49 @@ async function sendMessage() {
     }
 }
 
-async function uploadFile(file, uid) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('peer', activePeer.username);
+async function uploadFileInChunks(file, peerUsername, onProgress) {
+    const MAX_SIZE = 200 * 1024 * 1024;
+    if (file.size > MAX_SIZE) throw new Error('File exceeds 200MB limit');
 
-    const progressBar = document.querySelector(`[data-file-uid="${uid}"] .file-progress-bar`);
+    const initRes = await fetch('/api/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, size: file.size })
+    });
+    if (!initRes.ok) throw new Error('Failed to init upload');
+    const initData = await initRes.json();
+    const uploadId = initData.upload_id;
 
-    try {
-        const xhr = new XMLHttpRequest();
+    const CHUNK_SIZE = 512 * 1024;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-        xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable && progressBar) {
-                const pct = (e.loaded / e.total) * 100;
-                progressBar.style.width = pct + '%';
-            }
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const blob = file.slice(start, end);
+
+        const form = new FormData();
+        form.append('upload_id', uploadId);
+        form.append('index', String(i));
+        form.append('chunk', blob, file.name);
+
+        const chunkRes = await fetch('/api/upload/chunk', {
+            method: 'POST',
+            body: form
         });
+        if (!chunkRes.ok) throw new Error('Chunk upload failed');
 
-        xhr.addEventListener('load', () => {
-            if (xhr.status === 200) {
-                try {
-                    const result = JSON.parse(xhr.responseText);
-                    if (result.success) {
-                        notifications.success(`Файл "${file.name}" отправлен`);
-                    } else {
-                        notifications.error(`Ошибка: ${result.error}`);
-                    }
-                } catch (e) {
-                    notifications.error('Ошибка парсинга ответа');
-                }
-            } else {
-                notifications.error('Ошибка загрузки файла');
-            }
-        });
-
-        xhr.addEventListener('error', () => {
-            notifications.error(`Не удалось загрузить "${file.name}"`);
-        });
-
-        xhr.open('POST', '/api/send_file');
-        xhr.send(formData);
-    } catch (err) {
-        console.error('Upload error:', err);
-        notifications.error(`Ошибка загрузки "${file.name}"`);
+        if (onProgress) onProgress((i + 1) / totalChunks);
     }
+
+    const completeRes = await fetch('/api/upload/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_id: uploadId })
+    });
+    if (!completeRes.ok) throw new Error('Upload complete failed');
+    const completeData = await completeRes.json();
+    return completeData;
 }
 
 function renderFilePreview() {
