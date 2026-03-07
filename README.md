@@ -1,260 +1,258 @@
-# 🔐 Secure P2P Messenger with File Transfer
+# 🔐 Безопасный P2P Мессенджер с передачей файлов
 
-A secure peer-to-peer messenger with end-to-end encryption and file transfer capabilities, built with Python and modern web technologies.
+Безопасный одноранговый мессенджер со сквозным шифрованием и возможностью передачи файлов, созданный с использованием Python и современных веб-технологий.
 
-## ✨ Features
+## ✨ Возможности
 
-### 🔒 Security
-- **End-to-end encryption** using elliptic curve cryptography (ECDH)
-- **Perfect forward secrecy** with ephemeral session keys
-- **Digital signatures** for message authenticity
-- **Onion routing** for enhanced privacy
-- **Secure key exchange** with handshake protocol
+### 🔒 Безопасность
+- **Сквозное шифрование** с использованием криптографии на эллиптических кривых (ECDH)
+- **Совершенная прямая секретность** с эфемерными сеансовыми ключами
+- **Цифровые подписи** для подтверждения подлинности сообщений
+- **Луковая маршрутизация** для повышенной конфиденциальности
+- **Безопасный обмен ключами** с протоколом рукопожатия
 
-### 💬 Messaging
-- **Real-time P2P messaging** without central servers
-- **Peer discovery** via UDP broadcast
-- **Message delivery receipts** and read status
-- **System notifications** for file transfers
-- **Chat history** with local SQLite storage
+### 💬 Обмен сообщениями
+- **Обмен сообщениями в реальном времени** без центральных серверов
+- **Обнаружение пиров** через UDP-широковещание
+- **Подтверждения доставки** и статус прочтения
+- **Системные уведомления** о передаче файлов
+- **История чатов** с локальным хранилищем SQLite
 
-### 📁 File Transfer
-- **Secure file transfer** with encryption
-- **Chunked uploads** for large files
-- **Progress tracking** with real-time updates
-- **File validation** with checksums
-- **Auto-accept** for trusted peers
-- **Transfer cancellation** support
+### 📁 Передача файлов
+- **Безопасная передача файлов** с шифрованием
+- **Загрузка частями** для больших файлов
+- **Отслеживание прогресса** с обновлениями в реальном времени
+- **Проверка файлов** с контрольными суммами
+- **Автопринятие** для доверенных пиров
+- **Поддержка отмены** передачи
 
-### 🎨 User Interface
-- **Modern responsive web interface**
-- **Real-time updates** without page refresh
-- **File preview** and progress bars
-- **Mobile-friendly** design
-- **Dark/Light theme** support
+### 🎨 Пользовательский интерфейс
+- **Современный адаптивный веб-интерфейс**
+- **Обновления в реальном времени** без перезагрузки страницы
+- **Предпросмотр файлов** и индикаторы прогресса
+- **Мобильный дизайн**
+- **Поддержка темной/светлой темы**
 
-## 🚀 Quick Start
+## 🚀 Быстрый старт
 
-### Prerequisites
-- Python 3.8 or higher
-- pip package manager
+### Предварительные требования
+- Python 3.8 или выше
+- Менеджер пакетов pip
 
-### Installation
+### Установка
 
-1. **Clone the repository**
+1. **Клонируйте репозиторий**
    ```bash
    git clone https://github.com/your-username/MnM_HEX-TEAM.git
    cd MnM_HEX-TEAM
    ```
 
-2. **Create virtual environment**
+2. **Создайте виртуальное окружение**
    ```bash
    python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
+   source .venv/bin/activate  # На Windows: .venv\Scripts\activate
    ```
 
-3. **Install dependencies**
+3. **Установите зависимости**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Start the application**
+4. **Запустите приложение**
    ```bash
    python3 run_server.py
    ```
 
-5. **Open your browser**
-   Navigate to `http://localhost:8080`
+5. **Откройте браузер**
+   Перейдите по адресу `http://localhost:8080`
 
-## 📖 Usage
+## 📖 Использование
 
-### Basic Setup
-1. **Choose a username** when prompted
-2. **Connect to peers** on your local network
-3. **Start chatting** securely
+### Базовая настройка
+1. **Выберите имя пользователя** при запросе
+2. **Подключитесь к пирам** в вашей локальной сети
+3. **Начинайте общаться** безопасно
 
-### File Sharing
-1. **Click the attachment icon** 📎 in chat
-2. **Select files** to upload
-3. **Monitor progress** with real-time updates
-4. **Files auto-download** for trusted peers
+### Обмен файлами
+1. **Нажмите на значок вложения** 📎 в чате
+2. **Выберите файлы** для загрузки
+3. **Следите за прогрессом** с обновлениями в реальном времени
+4. **Файлы загружаются автоматически** для доверенных пиров
 
-### Network Configuration
-- **Default port**: 8080 (web), 8765 (P2P)
-- **Discovery**: UDP broadcast on local network
-- **Direct connection**: IP-to-IP messaging
+### Сетевые настройки
+- **Порт по умолчанию**: 8080 (веб), 8765 (P2P)
+- **Обнаружение**: UDP-широковещание в локальной сети
+- **Прямое подключение**: IP-IP обмен сообщениями
 
-## 🏗️ Architecture
+## 🏗️ Архитектура
 
-### Backend (`/back`)
+### Бэкенд (`/back`)
 ```
 back/
-├── main.py              # Core messenger logic
-├── web.py               # Flask web server & API
+├── main.py              # Основная логика мессенджера
+├── web.py               # Веб-сервер Flask и API
 ├── core/
-│   └── crypto.py        # Cryptographic engine
+│   └── crypto.py        # Криптографический движок
 ├── messaging/
-│   └── handshake.py     # Peer handshake protocol
+│   └── handshake.py     # Протокол рукопожатия пиров
 ├── network/
-│   ├── connection.py    # P2P connection manager
-│   ├── onion_router.py  # Onion routing implementation
-│   ├── file_transfer.py # Secure file transfer
-│   └── protocols.py     # Message protocols
+│   ├── connection.py    # Менеджер P2P-соединений
+│   ├── onion_router.py  # Реализация луковой маршрутизации
+│   ├── file_transfer.py # Безопасная передача файлов
+│   └── protocols.py     # Протоколы сообщений
 └── api/
-    └── local_api.py     # Local API server
+    └── local_api.py     # Локальный API-сервер
 ```
 
-### Frontend (`/frontend`)
+### Фронтенд (`/frontend`)
 ```
 frontend/
-├── index.html           # Main application page
-├── login.html           # User authentication
+├── index.html           # Главная страница приложения
+├── login.html           # Аутентификация пользователя
 ├── css/
-│   └── styles.css       # Modern responsive styles
+│   └── styles.css       # Современные адаптивные стили
 └── js/
-    └── app.js           # Interactive frontend logic
+    └── app.js           # Интерактивная логика фронтенда
 ```
 
-## 🔧 Configuration
+## 🔧 Настройка
 
-### Environment Variables
+### Переменные окружения
 ```bash
-export MESSENGER_USERNAME="your_username"  # Optional: Set default username
+export MESSENGER_USERNAME="your_username"  # Опционально: установить имя по умолчанию
 ```
 
-### Network Settings
-Edit `run_server.py` to customize:
-- Web server port
-- P2P communication port
-- File upload limits
-- Discovery settings
+### Сетевые настройки
+Отредактируйте `run_server.py` для настройки:
+- Порта веб-сервера
+- Порта P2P-коммуникации
+- Лимитов загрузки файлов
+- Настроек обнаружения
 
-## 🧪 Testing
+## 🧪 Тестирование
 
-### Run All Tests
+### Запуск всех тестов
 ```bash
 python3 tests/run_all_tests.py
 ```
 
-### Individual Test Suites
+### Отдельные тестовые наборы
 ```bash
-python3 tests/quick_test.py                    # Basic functionality
-python3 tests/test_file_transfer.py            # File transfer system
-python3 tests/test_comprehensive_p2p.py        # P2P integration
-python3 tests/test_complete_file_transfer.py   # End-to-end transfer
+python3 tests/quick_test.py                    # Базовая функциональность
+python3 tests/test_file_transfer.py            # Система передачи файлов
+python3 tests/test_comprehensive_p2p.py        # P2P интеграция
+python3 tests/test_complete_file_transfer.py   # Сквозная передача файлов
 ```
 
-### Test Coverage
-- ✅ Cryptographic operations
-- ✅ P2P messaging
-- ✅ File transfer protocol
-- ✅ Onion routing
-- ✅ Web API endpoints
-- ✅ Frontend integration
+### Покрытие тестами
+- ✅ Криптографические операции
+- ✅ P2P обмен сообщениями
+- ✅ Протокол передачи файлов
+- ✅ Луковая маршрутизация
+- ✅ Веб-API эндпоинты
+- ✅ Интеграция с фронтендом
 
-## 🔒 Security Details
+## 🔒 Детали безопасности
 
-### Cryptography
-- **Curve**: secp256r1 (prime256v1)
-- **Key exchange**: ECDH with HKDF
-- **Encryption**: AES-256-GCM
-- **Signatures**: ECDSA with SHA-256
-- **Hashing**: SHA-256 for integrity
+### Криптография
+- **Кривая**: secp256r1 (prime256v1)
+- **Обмен ключами**: ECDH с HKDF
+- **Шифрование**: AES-256-GCM
+- **Подписи**: ECDSA с SHA-256
+- **Хеширование**: SHA-256 для целостности
 
-### Privacy Features
-- **No central servers** - pure P2P
-- **Onion routing** for IP protection
-- **Ephemeral keys** for forward secrecy
-- **Local storage only** - no cloud exposure
+### Функции конфиденциальности
+- **Нет центральных серверов** - чистый P2P
+- **Луковая маршрутизация** для защиты IP
+- **Эфемерные ключи** для прямой секретности
+- **Только локальное хранение** - нет облачного хранения
 
-## 🌐 Network Protocol
+## 🌐 Сетевой протокол
 
-### Message Types
-- `HANDSHAKE_INIT` - Secure connection initiation
-- `HANDSHAKE_RESPONSE` - Handshake completion
-- `SECURE_MESSAGE` - Encrypted chat messages
-- `FILE_OFFER` - File transfer proposal
-- `FILE_CHUNK` - Encrypted file data
-- `DELIVERY_RECEIPT` - Message acknowledgment
+### Типы сообщений
+- `HANDSHAKE_INIT` - Инициация безопасного соединения
+- `HANDSHAKE_RESPONSE` - Завершение рукопожатия
+- `SECURE_MESSAGE` - Зашифрованные сообщения чата
+- `FILE_OFFER` - Предложение передачи файла
+- `FILE_CHUNK` - Зашифрованные данные файла
+- `DELIVERY_RECEIPT` - Подтверждение сообщения
 
-### Discovery Protocol
-- UDP broadcast on local network
-- Peer information exchange
-- Automatic peer detection
-- Device identification
+### Протокол обнаружения
+- UDP-широковещание в локальной сети
+- Обмен информацией о пирах
+- Автоматическое обнаружение пиров
+- Идентификация устройств
 
-## 📝 Development
+## 📝 Разработка
 
-### Adding Features
-1. **Backend**: Extend `/back/network/` modules
-2. **Frontend**: Modify `/frontend/js/app.js`
-3. **API**: Add endpoints in `/back/web.py`
-4. **Tests**: Create new test files in `/tests/`
+### Добавление функций
+1. **Бэкенд**: Расширьте модули в `/back/network/`
+2. **Фронтенд**: Измените `/frontend/js/app.js`
+3. **API**: Добавьте эндпоинты в `/back/web.py`
+4. **Тесты**: Создайте новые тестовые файлы в `/tests/`
 
-### Code Style
-- **Python**: PEP 8 compliant
-- **JavaScript**: Modern ES6+ standards
-- **CSS**: Responsive design with flexbox/grid
-- **Documentation**: Comprehensive docstrings
+### Стиль кода
+- **Python**: Соответствие PEP 8
+- **JavaScript**: Современные стандарты ES6+
+- **CSS**: Адаптивный дизайн с flexbox/grid
+- **Документация**: Полные докстринги
 
-## 🐛 Troubleshooting
+## 🐛 Устранение неполадок
 
-### Common Issues
+### Частые проблемы
 
-**Port already in use**
+**Порт уже используется**
 ```bash
-# Kill existing processes
+# Завершить существующие процессы
 lsof -ti:8080 | xargs kill -9
 python3 run_server.py
 ```
 
-**Firewall blocking**
-- Allow ports 8080 and 8765
-- Enable UDP broadcast for discovery
+**Блокировка брандмауэром**
+- Разрешите порты 8080 и 8765
+- Включите UDP-широковещание для обнаружения
 
-**Peers not discovered**
-- Check network connectivity
-- Verify same subnet
-- Disable VPN if needed
+**Пиры не обнаруживаются**
+- Проверьте сетевое подключение
+- Убедитесь, что в одной подсети
+- При необходимости отключите VPN
 
-**File transfer fails**
-- Verify sufficient disk space
-- Check file permissions
-- Ensure stable connection
+**Сбой передачи файлов**
+- Проверьте достаточно ли места на диске
+- Проверьте права доступа к файлам
+- Убедитесь в стабильности соединения
 
-### Debug Mode
-Enable debug logging:
+### Режим отладки
+Включите отладочное логирование:
 ```bash
 export DEBUG=1
 python3 run_server.py
 ```
 
-## 🤝 Contributing
+## 🤝 Участие в разработке
 
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Commit changes: `git commit -am 'Add feature'`
-4. Push to branch: `git push origin feature-name`
-5. Submit pull request
+1. Сделайте форк репозитория
+2. Создайте ветку функции: `git checkout -b feature-name`
+3. Зафиксируйте изменения: `git commit -am 'Add feature'`
+4. Отправьте в ветку: `git push origin feature-name`
+5. Создайте pull request
 
-## 📄 License
+## 📄 Лицензия
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Этот проект лицензирован под MIT License - подробности в файле [LICENSE](LICENSE).
 
-## 🙏 Acknowledgments
+## 🙏 Благодарности
 
-- **Cryptography**: Cryptography.io library
-- **Web Framework**: Flask with CORS support
-- **Frontend**: Vanilla JavaScript with modern APIs
-- **Testing**: Custom test framework with comprehensive coverage
+- **Криптография**: Библиотека Cryptography.io
+- **Веб-фреймворк**: Flask с поддержкой CORS
+- **Фронтенд**: Ванильный JavaScript с современными API
+- **Тестирование**: Пользовательский тестовый фреймворк с полным покрытием
 
-## 📞 Support
+## 📞 Поддержка
 
-For issues and questions:
-- Create GitHub issue
-- Check troubleshooting section
-- Review test cases for examples
+По вопросам и проблемам:
+- Создайте issue на GitHub
+- Проверьте раздел устранения неполадок
+- Изучите тестовые примеры
 
 ---
-
-**🔐 Secure P2P Messenger** - Communicate freely, securely, and without central control.
