@@ -9,6 +9,10 @@ import hashlib
 import socket
 import base64
 import cmd
+import uuid
+import subprocess
+import threading
+import json
 
 from core.crypto import SecureCryptoCore
 from core.exceptions import CryptoError
@@ -20,6 +24,44 @@ from storage.database import SecureDatabase
 from messaging.handshake import HandshakeManager
 
 
+def get_mac_address():
+    """Получить MAC-адрес для уникальной генерации ID"""
+    try:
+        # Попытка получить MAC через системные вызовы
+        if sys.platform == "win32":
+            result = subprocess.run(['getmac'], capture_output=True, text=True)
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if ':' in line and not line.startswith('  '):
+                    mac = line.split(':')[0].strip().replace('-', ':')
+                    if len(mac) == 17:
+                        return mac
+        else:
+            # Linux/macOS
+            result = subprocess.run(['ifconfig'], capture_output=True, text=True)
+            lines = result.stdout.split('\n')
+            for line in lines:
+                if 'ether' in line.lower():
+                    parts = line.split()
+                    for part in parts:
+                        if ':' in part and len(part) == 17:
+                            return part
+    except:
+        pass
+    
+    # Fallback: сгенерировать случайный MAC
+    return ':'.join(['{:02x}'.format(uuid.getnode() >> elements & 0xff) for elements in range(0, 8*6, 8)][::-1])
+
+
+def generate_unique_device_id(username: str) -> str:
+    """Сгенерировать уникальный device_id с MAC-адресом"""
+    mac = get_mac_address()
+    hostname = socket.gethostname()
+    timestamp = str(int(time.time()))
+    unique_string = f"{username}{hostname}{mac}{timestamp}"
+    return hashlib.sha256(unique_string.encode()).hexdigest()[:16]
+
+
 class SecureMessenger:
     """Главный класс мессенджера"""
 
@@ -29,7 +71,13 @@ class SecureMessenger:
         
         self.username = username.strip()
         self.start_time = time.time()
-        self.device_id = hashlib.sha256(f"{username}{socket.gethostname()}".encode()).hexdigest()[:16]
+        self.device_id = generate_unique_device_id(username)
+        self.mac_address = get_mac_address()
+        
+        # Mesh-сеть компоненты
+        self.id_conflicts = {}  # device_id -> conflict_info
+        self.mesh_queue = {}    # target_id -> messages
+        self.relay_nodes = {}   # node_id -> RelayNode
 
         print(f"\n🚀 Запуск Secure P2P Messenger")
         print(f"   Пользователь: {username}")
@@ -59,9 +107,16 @@ class SecureMessenger:
         print(f"🧅 Инициализация Onion Router...")
         self.router = OnionRouter(self.connection, self.crypto)
         self.router.file_manager.on_file_offer = self._on_incoming_file_offer
+        
+        # Включить mesh-функциональность
+        self.router.enable()
 
         print(f"💾 Инициализация базы данных...")
         self.db = SecureDatabase()
+        
+        # Инициализация mesh-компонентов
+        print(f"🌐 Инициализация Mesh-сети...")
+        self._init_mesh_components()
 
         print(f"🤝 Инициализация handshake менеджера...")
         self.handshake = HandshakeManager(self.crypto, self.username, self.discovery)
@@ -73,6 +128,18 @@ class SecureMessenger:
         print(f"\n📢 Найден пир: {info['username']} ({ip})")
         print(f"   Device ID: {info['device_id']}")
         print(f"   Последняя активность: {time.strftime('%H:%M:%S', time.localtime(info['last_seen']))}")
+        
+        # Зарегистрировать пира в connection manager для mesh-сети
+        self.connection.register_peer(info['device_id'], ip, info.get('port', 37021))
+        
+        # Добавить как потенциального ретранслятора
+        if hasattr(self.router, 'relay_manager'):
+            self.router.relay_manager.update_peer_status(info['device_id'], {
+                'bandwidth': 100,
+                'is_relay': True,
+                'reputation': 1.0
+            }, (ip, info.get('port', 37021)))
+        
         if info.get('public_key'):
             try:
                 pub_key_bytes = base64.b64decode(info['public_key'])
@@ -112,6 +179,25 @@ class SecureMessenger:
                 print(f"\n📁 Получено FILE сообщение: {msg_type} от {addr[0]}")
                 # always forward IP address for file routing
                 self.router.handle_incoming(msg_type, data, addr[0])
+            # Mesh-сеть сообщения
+            elif msg_type == MessageType.MESSAGE_RELAY:
+                print(f"\n🔄 Получено MESSAGE RELAY от {addr[0]}")
+                self._handle_message_relay(data, addr)
+            elif msg_type == MessageType.MESSAGE_STORE:
+                print(f"\n📦 Получено MESSAGE STORE от {addr[0]}")
+                self._handle_message_store(data, addr)
+            elif msg_type == MessageType.QUEUE_REQUEST:
+                print(f"\n📋 Получено QUEUE REQUEST от {addr[0]}")
+                self._handle_queue_request(data, addr)
+            elif msg_type == MessageType.QUEUE_SYNC:
+                print(f"\n🔄 Получено QUEUE SYNC от {addr[0]}")
+                self._handle_queue_sync(data, addr)
+            elif msg_type == MessageType.RELAY_STATUS_UPDATE:
+                print(f"\n📊 Получено RELAY STATUS от {addr[0]}")
+                self._handle_relay_status_update(data, addr)
+            elif msg_type == MessageType.ID_CONFLICT:
+                print(f"\n⚠️ Получен ID CONFLICT от {addr[0]}")
+                self._handle_id_conflict(data, addr)
             else:
                 print(f"\n❓ Неизвестный тип сообщения: {msg_type}")
         except Exception as e:
@@ -472,10 +558,285 @@ class SecureMessenger:
             return []
 
     def cleanup(self):
+        """Очистка ресурсов"""
         print("\n🧹 Очистка ресурсов...")
-        self.discovery.stop()
-        self.connection.stop()
-        print("✅ Завершено")
+        try:
+            if hasattr(self, 'discovery'):
+                self.discovery.stop()
+            if hasattr(self, 'connection'):
+                self.connection.stop()
+            if hasattr(self, 'router') and hasattr(self.router, 'relay_manager'):
+                self.router.relay_manager.shutdown()
+            print("✅ Ресурсы очищены")
+        except Exception as e:
+            print(f"❌ Ошибка очистки: {e}")
+
+    # ==================== MESH-СЕТЬ МЕТОДЫ ====================
+
+    def _init_mesh_components(self):
+        """Инициализация mesh-компонентов"""
+        try:
+            # Зарегистрировать себя как ретранслятор
+            if hasattr(self.router, 'relay_manager'):
+                self.db.add_mesh_relay(
+                    node_id=self.device_id,
+                    ip='127.0.0.1',  # Будет обновлено при обнаружении
+                    port=37021,
+                    capacity=100
+                )
+                print(f"   ✅ Зарегистрирован как mesh-ретранслятор: {self.device_id}")
+            
+            # Запустить фоновую очистку истекших сообщений
+            threading.Thread(target=self._cleanup_expired_messages, daemon=True).start()
+            print(f"   ✅ Запущена очистка mesh-очередей")
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка инициализации mesh: {e}")
+
+    def _handle_message_relay(self, data: dict, addr: tuple):
+        """Обработка ретранслируемого сообщения"""
+        try:
+            target_id = data.get('target_id')
+            original_sender = data.get('original_sender')
+            path = data.get('path', [])
+            encrypted_payload = data.get('encrypted_payload')
+            
+            if not all([target_id, original_sender, encrypted_payload]):
+                print("   ❌ Некорректное MESSAGE_RELAY")
+                return
+            
+            # Проверить, не является ли этот узел целью
+            if target_id == self.device_id:
+                # Расшифровать и обработать сообщение
+                try:
+                    original_message = json.loads(encrypted_payload)
+                    self._on_message(original_message, addr)
+                    print(f"   ✅ Получено ретранслированное сообщение от {original_sender}")
+                except Exception as e:
+                    print(f"   ❌ Ошибка расшифровки: {e}")
+                return
+            
+            # Продолжить ретрансляцию
+            if hasattr(self.router, 'relay_manager'):
+                success = self.router.relay_manager.relay_message(
+                    target_id, json.loads(encrypted_payload), original_sender, path
+                )
+                if success:
+                    print(f"   ✅ Сообщение ретранслировано далее к {target_id}")
+                else:
+                    print(f"   ❌ Не удалось ретранслировать сообщение к {target_id}")
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки MESSAGE_RELAY: {e}")
+
+    def _handle_message_store(self, data: dict, addr: tuple):
+        """Обработка запроса на хранение сообщения"""
+        try:
+            target_id = data.get('target_id')
+            original_sender = data.get('original_sender')
+            message_data = data.get('message_data')
+            
+            if not all([target_id, original_sender, message_data]):
+                print("   ❌ Некорректное MESSAGE_STORE")
+                return
+            
+            # Сохранить в mesh-очередь
+            queue_id = f"store_{target_id}_{int(time.time())}"
+            self.db.add_mesh_message(
+                queue_id=queue_id,
+                target_id=target_id,
+                message_id=message_data.get('msg_id', 'unknown'),
+                original_sender=original_sender,
+                encrypted_payload=json.dumps(message_data),
+                ttl=data.get('ttl', 3600),
+                priority=data.get('priority', 1)
+            )
+            
+            print(f"   ✅ Сообщение сохранено в mesh-очереди для {target_id}")
+            
+            # Отправить подтверждение
+            receipt = {
+                'type': MessageType.DELIVERY_RECEIPT,
+                'in_response_to': message_data.get('msg_id'),
+                'status': 'delivered',
+                'msg_id': f"receipt_{int(time.time())}",
+                'timestamp': time.time()
+            }
+            self.connection.send_to_peer(addr[0], receipt)
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки MESSAGE_STORE: {e}")
+
+    def _handle_queue_request(self, data: dict, addr: tuple):
+        """Обработка запроса сообщений из очереди"""
+        try:
+            requester_id = data.get('requester_id')
+            since_timestamp = data.get('since_timestamp', 0)
+            
+            if requester_id != self.device_id:
+                print("   ❌ QUEUE_REQUEST не для этого узла")
+                return
+            
+            # Получить сообщения из очереди
+            messages = self.db.get_mesh_messages_for_target(self.device_id, limit=50)
+            
+            if messages:
+                print(f"   📤 Найдено {len(messages)} сообщений в очереди")
+                
+                for queue_id, message_id, original_sender, encrypted_payload, path, priority, created in messages:
+                    # Отправить сообщение
+                    try:
+                        original_message = json.loads(encrypted_payload)
+                        success = self.connection.send_message(original_sender, original_message)
+                        
+                        if success:
+                            # Отметить как доставленное
+                            self.db.mark_mesh_message_delivered(queue_id)
+                            print(f"   ✅ Доставлено сообщение {message_id} от {original_sender}")
+                        else:
+                            print(f"   ❌ Не удалось доставить сообщение {message_id}")
+                            
+                    except Exception as e:
+                        print(f"   ❌ Ошибка доставки сообщения {message_id}: {e}")
+            else:
+                print(f"   📭 Нет сообщений в очереди")
+                
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки QUEUE_REQUEST: {e}")
+
+    def _handle_queue_sync(self, data: dict, addr: tuple):
+        """Обработка синхронизации очередей"""
+        try:
+            queue_data = data.get('queue_data', {})
+            sync_timestamp = data.get('sync_timestamp', time.time())
+            
+            target_id = queue_data.get('target_id')
+            message_count = queue_data.get('message_count', 0)
+            oldest_message = queue_data.get('oldest_message', 0)
+            
+            print(f"   🔄 Синхронизация очереди для {target_id}: {message_count} сообщений")
+            
+            # Можно добавить логику синхронизации здесь
+            # Например, запросить недостающие сообщения
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки QUEUE_SYNC: {e}")
+
+    def _handle_relay_status_update(self, data: dict, addr: tuple):
+        """Обработка обновления статуса ретранслятора"""
+        try:
+            relay_id = data.get('relay_id')
+            capacity = data.get('capacity', 100)
+            current_load = data.get('current_load', 0)
+            reputation = data.get('reputation', 1.0)
+            
+            if not relay_id:
+                print("   ❌ Некорректное RELAY_STATUS_UPDATE")
+                return
+            
+            # Обновить в базе данных
+            self.db.update_mesh_relay_status(
+                node_id=relay_id,
+                current_load=current_load,
+                reputation=reputation,
+                is_active=True
+            )
+            
+            # Обновить в relay manager
+            if hasattr(self.router, 'relay_manager'):
+                self.router.relay_manager.update_peer_status(relay_id, {
+                    'bandwidth': capacity,
+                    'is_relay': True,
+                    'reputation': reputation
+                }, addr)
+            
+            print(f"   ✅ Обновлен статус ретранслятора {relay_id}")
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки RELAY_STATUS_UPDATE: {e}")
+
+    def _handle_id_conflict(self, data: dict, addr: tuple):
+        """Обработка конфликта ID"""
+        try:
+            conflicting_id = data.get('conflicting_id')
+            claimant_info = data.get('claimant_info', {})
+            
+            if conflicting_id == self.device_id:
+                print(f"   ⚠️ Обнаружен конфликт ID для {self.device_id}")
+                
+                # Сгенерировать новый ID
+                new_id = generate_unique_device_id(self.username)
+                print(f"   🔄 Генерируем новый ID: {new_id}")
+                
+                # Отправить разрешение конфликта
+                resolution = {
+                    'type': MessageType.ID_RESOLUTION,
+                    'resolved_id': new_id,
+                    'resolution_type': 'regenerated',
+                    'msg_id': f"resolve_{int(time.time())}",
+                    'timestamp': time.time()
+                }
+                self.connection.send_to_peer(addr[0], resolution)
+                
+                # Обновить свой ID (требуется перезапуск)
+                print(f"   ⚠️ Требуется перезапуск с новым ID: {new_id}")
+                
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки ID_CONFLICT: {e}")
+
+    def _cleanup_expired_messages(self):
+        """Фоновая очистка истекших сообщений"""
+        while True:
+            try:
+                time.sleep(300)  # Каждые 5 минут
+                deleted = self.db.cleanup_expired_mesh_messages()
+                if deleted > 0:
+                    print(f"   🗑️ Удалено {deleted} истекших mesh-сообщений")
+            except Exception as e:
+                print(f"   ❌ Ошибка очистки: {e}")
+
+    def send_message_via_mesh(self, target_device_id: str, message: dict) -> bool:
+        """Отправить сообщение через mesh-сеть"""
+        try:
+            if hasattr(self.router, 'relay_manager'):
+                success = self.router.relay_manager.relay_message(
+                    target_device_id, message, self.device_id
+                )
+                if success:
+                    print(f"   📤 Сообщение отправлено через mesh к {target_device_id}")
+                    return True
+                else:
+                    print(f"   ❌ Не удалось отправить сообщение через mesh")
+                    return False
+            else:
+                # Fallback to direct connection
+                return self.connection.send_message(target_device_id, message)
+                
+        except Exception as e:
+            print(f"   ❌ Ошибка отправки через mesh: {e}")
+            return False
+
+    def get_mesh_stats(self) -> dict:
+        """Получить статистику mesh-сети"""
+        stats = {
+            'device_id': self.device_id,
+            'relays': 0,
+            'queued_messages': 0,
+            'active_circuits': 0
+        }
+        
+        try:
+            if hasattr(self.router, 'relay_manager'):
+                relay_stats = self.router.relay_manager.get_stats()
+                stats.update(relay_stats)
+            
+            queue_stats = self.db.get_mesh_queue_stats()
+            stats['queued_messages'] = queue_stats['total_queued']
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка получения статистики: {e}")
+        
+        return stats
 
 
 class ConsoleFrontend(cmd.Cmd):
@@ -487,9 +848,11 @@ class ConsoleFrontend(cmd.Cmd):
   send <имя> <текст> - отправить сообщение
   info [имя]         - информация о себе или пире
   myinfo             - информация о себе
+  mesh               - показать статистику mesh-сети
+  mesh send <id> <msg> - отправить сообщение через mesh
   exit               - выход
 """
-    prompt = '> '
+    prompt = "(messenger) "
 
     def __init__(self, messenger: SecureMessenger):
         super().__init__()
@@ -529,6 +892,43 @@ class ConsoleFrontend(cmd.Cmd):
 
     def do_EOF(self, arg):
         return self.do_exit(arg)
+
+    def do_mesh(self, arg):
+        """Mesh-сеть команды: stats, send <device_id> <message>"""
+        if not arg:
+            stats = self.messenger.get_mesh_stats()
+            print("\n📊 Mesh-сеть статистика:")
+            print(f"  Device ID: {stats['device_id']}")
+            print(f"  Активные ретрансляторы: {stats.get('known_relays', 0)}")
+            print(f"  Сообщений в очередях: {stats.get('queued_messages', 0)}")
+            print(f"  Активных цепей: {stats.get('active_circuits', 0)}")
+            print(f"  Ретранслировано сообщений: {stats.get('relayed_msgs', 0)}")
+            print(f"  Доставлено сообщений: {stats.get('messages_delivered', 0)}")
+            return
+        
+        parts = arg.split()
+        if parts[0] == "send" and len(parts) >= 3:
+            device_id = parts[1]
+            message_text = " ".join(parts[2:])
+            
+            # Создать тестовое сообщение
+            test_message = {
+                'type': 'SECURE_MESSAGE',
+                'chat_id': f"mesh_{device_id}",
+                'encrypted': {'content': message_text},
+                'msg_id': f"mesh_{int(time.time())}",
+                'timestamp': time.time()
+            }
+            
+            success = self.messenger.send_message_via_mesh(device_id, test_message)
+            if success:
+                print(f"   ✅ Сообщение отправлено через mesh-сеть")
+            else:
+                print(f"   ❌ Не удалось отправить сообщение")
+        else:
+            print("Использование:")
+            print("  mesh              - показать статистику mesh-сети")
+            print("  mesh send <id> <msg> - отправить сообщение через mesh")
 
     def complete_chat(self, text, line, begidx, endidx):
         peers = self.messenger.discovery.get_all_peers()

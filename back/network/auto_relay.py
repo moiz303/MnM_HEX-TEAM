@@ -5,7 +5,7 @@ import json
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from collections import defaultdict
-from .protocols import MessageType, RelayLimits
+from .protocols import MessageType, RelayLimits, RelayNode, MeshMessage, MeshQueue
 
 
 @dataclass
@@ -46,13 +46,21 @@ class AutoRelayManager:
         self.active_circuits: Dict[str, Circuit] = {}
         self.pending_circuits: Dict[str, dict] = {}
         self.transit_circuits: Dict[str, Circuit] = {}
+        
+        # Mesh-сеть компоненты
+        self.mesh_queues: Dict[str, MeshQueue] = {}  # target_id -> queue
+        self.stored_messages: Dict[str, MeshMessage] = {}  # message_id -> message
+        self.routing_table: Dict[str, List[str]] = {}  # target_id -> optimal_path
+        
         self.lock = threading.RLock()
         self.stats = {
             'relayed_msgs': 0,
             'relayed_bytes': 0,
             'circuits_created': 0,
             'circuits_failed': 0,
-            'rate_limit_hits': 0
+            'rate_limit_hits': 0,
+            'messages_stored': 0,
+            'messages_delivered': 0
         }
         self.rate_limits = defaultdict(list)
         self.max_requests_per_minute = 60
@@ -64,6 +72,8 @@ class AutoRelayManager:
             threading.Thread(target=self._cleanup_loop, daemon=True),
             threading.Thread(target=self._heartbeat_loop, daemon=True),
             threading.Thread(target=self._rate_limit_cleanup, daemon=True),
+            threading.Thread(target=self._queue_processing_loop, daemon=True),
+            threading.Thread(target=self._delivery_retry_loop, daemon=True),
         ]
         for t in threads:
             t.start()
@@ -437,11 +447,240 @@ class AutoRelayManager:
                 'relayed_bytes': self.stats['relayed_bytes'],
                 'circuits_created': self.stats['circuits_created'],
                 'circuits_failed': self.stats['circuits_failed'],
-                'rate_limit_hits': self.stats['rate_limit_hits'],
-                'total_network_msgs': total_msgs,
-                'total_network_bytes': total_bytes,
-                'uptime': time.time() - (self.active_circuits[list(self.active_circuits.keys())[0]].created_at if self.active_circuits else time.time())
+                'messages_stored': self.stats['messages_stored'],
+                'messages_delivered': self.stats['messages_delivered'],
+                'stored_messages': len(self.stored_messages),
+                'mesh_queues': len(self.mesh_queues)
             }
+
+    # ==================== MESH-СЕТЬ МЕТОДЫ ====================
+
+    def _queue_processing_loop(self):
+        """Фоновая обработка mesh-очередей"""
+        while not self._stop_event.is_set():
+            time.sleep(5.0)
+            with self.lock:
+                now = time.time()
+                for target_id, queue in list(self.mesh_queues.items()):
+                    # Удаление истекших сообщений
+                    queue.messages = [msg for msg in queue.messages if msg.expires_at > now]
+                    
+                    # Синхронизация очередей с другими ретрансляторами
+                    if now - queue.last_sync > 30.0:
+                        self._sync_queue(target_id, queue)
+
+    def _delivery_retry_loop(self):
+        """Фоновая попытка доставки офлайн сообщений"""
+        while not self._stop_event.is_set():
+            time.sleep(15.0)
+            with self.lock:
+                for target_id, queue in list(self.mesh_queues.items()):
+                    if queue.messages:
+                        # Проверить доступность цели
+                        if self._is_peer_available(target_id):
+                            self._deliver_queued_messages(target_id, queue)
+
+    def store_message_for_offline_target(self, target_id: str, message: dict, original_sender: str) -> bool:
+        """Сохранить сообщение для офлайн получателя"""
+        try:
+            message_id = message.get('msg_id', f"store_{int(time.time())}_{random.randint(10000, 99999)}")
+            
+            mesh_message = MeshMessage(
+                message_id=message_id,
+                original_sender=original_sender,
+                target_id=target_id,
+                encrypted_payload=json.dumps(message),
+                path=[],
+                ttl=3600,  # 1 час
+                priority=1,
+                created=time.time(),
+                expires_at=time.time() + 3600
+            )
+            
+            with self.lock:
+                # Сохранить сообщение
+                self.stored_messages[message_id] = mesh_message
+                
+                # Добавить в очередь цели
+                if target_id not in self.mesh_queues:
+                    self.mesh_queues[target_id] = MeshQueue(
+                        queue_id=f"queue_{target_id}",
+                        target_id=target_id,
+                        messages=[],
+                        max_size=100,
+                        created=time.time(),
+                        last_sync=time.time()
+                    )
+                
+                queue = self.mesh_queues[target_id]
+                queue.messages.append(mesh_message)
+                
+                # Ограничение размера очереди
+                if len(queue.messages) > queue.max_size:
+                    queue.messages = sorted(queue.messages, key=lambda x: x.created)[:-1]
+                
+                self.stats['messages_stored'] += 1
+            
+            print(f"📦 Message {message_id} stored for offline target {target_id}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to store message for {target_id}: {e}")
+            return False
+
+    def relay_message(self, target_id: str, message: dict, original_sender: str, path: List[str] = None) -> bool:
+        """Ретранслировать сообщение через mesh-сеть"""
+        try:
+            if path is None:
+                path = []
+            
+            # Проверить TTL и циклы
+            if len(path) > RelayLimits.MAX_HOPS:
+                print(f"⚠️ Max hops exceeded for message to {target_id}")
+                return False
+            
+            # Проверить, не посещали ли уже этот узел
+            if self.conn_mgr.peer_id in path:
+                print(f"⚠️ Loop detected for message to {target_id}")
+                return False
+            
+            # Добавить текущий узел в путь
+            current_path = path + [self.conn_mgr.peer_id]
+            
+            # Попытка прямой доставки
+            if self._is_peer_available(target_id):
+                success = self.conn_mgr.send_message(target_id, message)
+                if success:
+                    self.stats['messages_delivered'] += 1
+                    print(f"🎯 Direct delivery successful to {target_id}")
+                    return True
+            
+            # Найти оптимальный ретранслятор
+            best_relay = self._find_best_relay(target_id, current_path)
+            if not best_relay:
+                # Сохранить для офлайн доставки
+                return self.store_message_for_offline_target(target_id, message, original_sender)
+            
+            # Создать relay сообщение
+            relay_msg = {
+                'type': MessageType.MESSAGE_RELAY,
+                'target_id': target_id,
+                'original_sender': original_sender,
+                'path': current_path,
+                'ttl': RelayLimits.MAX_HOPS - len(current_path),
+                'encrypted_payload': json.dumps(message),
+                'msg_id': message.get('msg_id', f"relay_{int(time.time())}"),
+                'timestamp': time.time()
+            }
+            
+            success = self.conn_mgr.send_message(best_relay, relay_msg)
+            if success:
+                self.stats['relayed_msgs'] += 1
+                print(f"🔄 Message relayed via {best_relay} to {target_id}")
+                return True
+            else:
+                # Если ретранслятор недоступен, сохранить сообщение
+                return self.store_message_for_offline_target(target_id, message, original_sender)
+                
+        except Exception as e:
+            print(f"❌ Failed to relay message to {target_id}: {e}")
+            return False
+
+    def _find_best_relay(self, target_id: str, exclude_path: List[str]) -> Optional[str]:
+        """Найти лучший ретранслятор для цели"""
+        with self.lock:
+            candidates = []
+            
+            for relay_id, relay_info in self.known_relays.items():
+                if (relay_info.is_relay and 
+                    relay_info.reputation_score > 0.3 and
+                    relay_id not in exclude_path and
+                    relay_id != target_id):
+                    
+                    # Calculate relay score
+                    load_factor = 1.0 - (relay_info.bandwidth / 100.0)  # Lower load = better
+                    reputation_factor = relay_info.reputation_score
+                    availability = 1.0 if time.time() - relay_info.last_seen < 60 else 0.5
+                    
+                    score = (reputation_factor * 0.5 + load_factor * 0.3 + availability * 0.2)
+                    candidates.append((relay_id, score))
+            
+            if not candidates:
+                return None
+            
+            # Выбрать лучший ретранслятор
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            return candidates[0][0]
+
+    def _is_peer_available(self, peer_id: str) -> bool:
+        """Проверить доступность пира"""
+        # Проверить активные соединения
+        if hasattr(self.conn_mgr, 'is_peer_connected'):
+            return self.conn_mgr.is_peer_connected(peer_id)
+        
+        # Проверить время последнего обнаружения
+        if peer_id in self.known_relays:
+            return time.time() - self.known_relays[peer_id].last_seen < 60
+        
+        return False
+
+    def _deliver_queued_messages(self, target_id: str, queue: MeshQueue):
+        """Доставить накопленные сообщения цели"""
+        if not queue.messages:
+            return
+        
+        delivered_count = 0
+        failed_messages = []
+        
+        for message in queue.messages:
+            try:
+                # Восстановить исходное сообщение
+                original_message = json.loads(message.encrypted_payload)
+                success = self.conn_mgr.send_message(target_id, original_message)
+                
+                if success:
+                    delivered_count += 1
+                    self.stats['messages_delivered'] += 1
+                    # Удалить доставленное сообщение
+                    if message.message_id in self.stored_messages:
+                        del self.stored_messages[message.message_id]
+                else:
+                    failed_messages.append(message)
+                    
+            except Exception as e:
+                print(f"❌ Failed to deliver queued message {message.message_id}: {e}")
+                failed_messages.append(message)
+        
+        # Обновить очередь
+        queue.messages = failed_messages
+        
+        if delivered_count > 0:
+            print(f"📤 Delivered {delivered_count} queued messages to {target_id}")
+
+    def _sync_queue(self, target_id: str, queue: MeshQueue):
+        """Синхронизировать очередь с другими ретрансляторами"""
+        try:
+            sync_data = {
+                'target_id': target_id,
+                'message_count': len(queue.messages),
+                'oldest_message': min(msg.created for msg in queue.messages) if queue.messages else 0
+            }
+            
+            # Отправить синхронизацию другим ретрансляторам
+            for relay_id in self.known_relays:
+                if relay_id != target_id and self.known_relays[relay_id].is_relay:
+                    sync_msg = {
+                        'type': MessageType.QUEUE_SYNC,
+                        'queue_data': sync_data,
+                        'sync_timestamp': time.time(),
+                        'msg_id': f"sync_{int(time.time())}_{random.randint(10000, 99999)}"
+                    }
+                    self.conn_mgr.send_message(relay_id, sync_msg)
+            
+            queue.last_sync = time.time()
+            
+        except Exception as e:
+            print(f"❌ Failed to sync queue for {target_id}: {e}")
 
     def get_relay_peers(self) -> List[dict]:
         with self.lock:

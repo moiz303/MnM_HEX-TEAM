@@ -1,0 +1,27 @@
+{
+  "timestamp": 1772898229.121987,
+  "test_name": "comprehensive_test",
+  "data": {
+    "test_results": {
+      "mesh_network": {
+        "success": false,
+        "error": "Не удалось запустить узлы"
+      },
+      "encryption": {
+        "success": false,
+        "error": "Криптографические модули недоступны"
+      },
+      "file_transfer": {
+        "success": false,
+        "error": "Модули передачи файлов недоступны"
+      },
+      "integration": {
+        "success": false,
+        "error": "Не удалось запустить mesh-сеть"
+      }
+    },
+    "overall_score": 0,
+    "total_duration": 4.272444009780884,
+    "timestamp": 1772898229.121962
+  }
+}

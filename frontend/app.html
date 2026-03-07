@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SGram - Secure P2P Messenger</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        /* Навигация */
+        .nav-header {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: white;
+            text-decoration: none;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        
+        .nav-brand .logo {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(45deg, #00d9ff, #0099cc);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .nav-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+        
+        .nav-btn.active {
+            background: linear-gradient(45deg, #00d9ff, #0099cc);
+            border-color: #00d9ff;
+        }
+        
+        .nav-user-info {
+            color: white;
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+        
+        /* Контейнеры страниц */
+        .page-container {
+            display: none;
+            min-height: 100vh;
+            padding-top: 80px;
+        }
+        
+        .page-container.active {
+            display: block;
+        }
+        
+        /* Адаптация существующих стилей */
+        .app-container {
+            padding-top: 0;
+        }
+        
+        .sidebar {
+            top: 80px;
+            height: calc(100vh - 80px);
+        }
+        
+        .chat-container {
+            margin-left: 300px;
+            padding-top: 80px;
+        }
+        
+        @media (max-width: 768px) {
+            .chat-container {
+                margin-left: 0;
+            }
+            
+            .nav-buttons {
+                flex-wrap: wrap;
+            }
+            
+            .nav-brand {
+                font-size: 1.2em;
+            }
+            
+            .nav-btn {
+                font-size: 0.8em;
+                padding: 6px 12px;
+            }
+        }
+        
+        /* Стили для визуализатора */
+        .mesh-visualizer-page {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        /* Стили для дашборда */
+        .dashboard-page {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        /* Уведомления */
+        .notification {
+            position: fixed;
+            top: 90px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            border-left: 4px solid #00d9ff;
+            z-index: 1001;
+            max-width: 300px;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .notification.success {
+            border-left-color: #4CAF50;
+        }
+        
+        .notification.error {
+            border-left-color: #f44336;
+        }
+        
+        .notification.warning {
+            border-left-color: #ff9800;
+        }
+    </style>
+</head>
+<body>
+    <!-- Навигация -->
+    <header class="nav-header">
+        <a href="#" class="nav-brand" onclick="navigateIfAuth('chat')">
+            <div class="logo">S</div>
+            <span>SGram</span>
+        </a>
+        
+        <div class="nav-buttons">
+            <button class="nav-btn" onclick="navigateIfAuth('chat')" id="nav-chat">
+                💬 Чаты
+            </button>
+            <button class="nav-btn" onclick="navigateIfAuth('visualizer')" id="nav-visualizer">
+                🌐 Визуализатор
+            </button>
+            <button class="nav-btn" onclick="navigateIfAuth('dashboard')" id="nav-dashboard">
+                🧪 Тесты
+            </button>
+            <button class="nav-btn" onclick="showPage('login')" id="nav-login">
+                👤 Вход
+            </button>
+        </div>
+        
+        <div class="nav-user-info" id="nav-user">
+            Загрузка...
+        </div>
+    </header>
+
+    <!-- Страница чатов -->
+    <div id="chat-page" class="page-container active">
+        <div class="app-container">
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2 class="logo">SGram</h2>
+                    <div class="current-username" id="current-user-name">Loading...</div>
+                </div>
+
+                <div class="search-container">
+                    <input type="text" id="search-input" placeholder="Поиск контактов..." class="form-control">
+                </div>
+
+                <div id="peers-list" class="peers-list"></div>
+            </aside>
+
+            <main class="chat-container">
+                <div class="chat-header">
+                    <div class="chat-user-info">
+                        <div class="user-details">
+                            <h3 id="header-name">Выберите чат</h3>
+                            <p id="header-status">Выберите контакт для начала общения</p>
+                        </div>
+                        <div class="user-status" id="header-status-indicator">
+                            <span class="status-dot"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chat-messages" id="chat-messages">
+                    <div class="welcome-message">
+                        <h3>🔐 Secure P2P Messenger</h3>
+                        <p>Выберите контакт для начала безопасного общения</p>
+                    </div>
+                </div>
+
+                <div class="chat-input-container">
+                    <div class="input-group">
+                        <input type="text" id="message-input" placeholder="Введите сообщение..." class="form-control" disabled>
+                        <button id="send-button" class="btn-primary" disabled>➤</button>
+                    </div>
+                    <div class="file-controls">
+                        <input type="file" id="file-input" multiple style="display: none;" disabled>
+                        <button id="file-button" class="btn-secondary" disabled>📎</button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Страница визуализатора -->
+    <div id="visualizer-page" class="page-container">
+        <div class="mesh-visualizer-page">
+            <div class="container">
+                <div class="header">
+                    <h1>🌐 Mesh Network Visualizer</h1>
+                    <p>Визуализация P2P сети в реальном времени</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="node-count">0</div>
+                        <div class="stat-label">Узлов в сети</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="relay-count">0</div>
+                        <div class="stat-label">Ретрансляторов</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="message-count">0</div>
+                        <div class="stat-label">Очередь сообщений</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="circuit-count">0</div>
+                        <div class="stat-label">Активных цепей</div>
+                    </div>
+                </div>
+                
+                <div class="network-container">
+                    <h3>🔗 Топология сети</h3>
+                    <canvas id="network-canvas" class="network-canvas"></canvas>
+                    <div class="node-info" id="node-info"></div>
+                    
+                    <div class="controls">
+                        <button class="btn" onclick="updateVisualizerStats()">🔄 Обновить</button>
+                        <button class="btn secondary" onclick="toggleAnimation()">▶️ Анимация</button>
+                        <button class="btn secondary" onclick="sendTestMessage()">📤 Тест</button>
+                        <button class="btn danger" onclick="clearVisualizerLogs()">🗑️ Очистить</button>
+                    </div>
+                </div>
+                
+                <div class="message-log" id="visualizer-log">
+                    <h3>📋 События сети</h3>
+                    <div id="log-content"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Страница дашборда -->
+    <div id="dashboard-page" class="page-container">
+        <div class="dashboard-page">
+            <div class="container">
+                <div class="header">
+                    <h1>🧪 Mesh Network Test Dashboard</h1>
+                    <p>Панель управления тестами сети</p>
+                </div>
+
+                <div class="test-controls">
+                    <div class="control-group">
+                        <h3>🚀 Быстрый запуск тестов</h3>
+                        <div class="button-grid">
+                            <button class="btn success" onclick="runQuickTest()">
+                                ⚡ Быстрый тест
+                            </button>
+                            <button class="btn primary" onclick="runFullTest()">
+                                🔍 Полный тест
+                            </button>
+                            <button class="btn warning" onclick="runStressTest()">
+                                💪 Нагрузочный тест
+                            </button>
+                            <button class="btn secondary" onclick="runAllTests()">
+                                🧪 Все тесты
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <h3>📊 Результаты тестов</h3>
+                        <div id="test-results">
+                            <div class="result-card">
+                                <h4>Последний запуск</h4>
+                                <p id="last-test-status">Тесты не запускались</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="test-log">
+                    <h3>📋 Лог тестирования</h3>
+                    <div id="test-log-content"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Страница входа -->
+    <div id="login-page" class="page-container">
+        <div class="login-container">
+            <div class="login-header">
+                <h1>🔐 Secure P2P Messenger</h1>
+                <p>Безопасный мессенджер с шифрованием</p>
+            </div>
+            
+            <form id="login-form" class="login-form">
+                <div class="form-group">
+                    <label for="username-input">Имя пользователя:</label>
+                    <input type="text" id="username-input" class="form-control" placeholder="Введите ваше имя" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="port-input">Порт (опционально):</label>
+                    <input type="number" id="port-input" class="form-control" placeholder="8080" min="1024" max="65535">
+                </div>
+                
+                <button type="submit" class="btn-primary login-btn">
+                    🔓 Войти в чат
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Контейнер для уведомлений -->
+    <div id="notification-container"></div>
+
+    <script src="js/app.js?v=1.1"></script>
+    <script src="js/navigation.js?v=1.1"></script>
+    <script src="js/visualizer.js?v=1.1"></script>
+    <script src="js/dashboard.js?v=1.1"></script>
+</body>
+</html>

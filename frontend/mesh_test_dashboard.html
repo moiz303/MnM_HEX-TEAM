@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesh Network Test Dashboard</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .test-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .control-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .control-card h3 {
+            margin-top: 0;
+            color: #4CAF50;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            margin: 5px;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        .btn.danger {
+            background: linear-gradient(45deg, #f44336, #d32f2f);
+        }
+        
+        .btn.secondary {
+            background: linear-gradient(45deg, #2196F3, #1976D2);
+        }
+        
+        .btn:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+            text-align: center;
+        }
+        
+        .status-card.online {
+            border-color: #4CAF50;
+            box-shadow: 0 0 20px rgba(76, 175, 80, 0.3);
+        }
+        
+        .status-card.offline {
+            border-color: #f44336;
+            box-shadow: 0 0 20px rgba(244, 67, 54, 0.3);
+        }
+        
+        .node-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .node-id {
+            font-size: 0.9em;
+            opacity: 0.8;
+            margin-bottom: 15px;
+        }
+        
+        .test-results {
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            transition: width 0.5s ease;
+            border-radius: 10px;
+        }
+        
+        .log-container {
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.05);
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        
+        .log-entry.success {
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .log-entry.error {
+            border-left: 4px solid #f44336;
+        }
+        
+        .log-entry.info {
+            border-left: 4px solid #2196F3;
+        }
+        
+        .timestamp {
+            color: #aaa;
+            margin-right: 10px;
+        }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .metric {
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .metric-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .testing {
+            animation: pulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 Mesh Network Test Dashboard</h1>
+            <p>Комплексное тестирование децентрализованной сети</p>
+        </div>
+        
+        <div class="test-controls">
+            <div class="control-card">
+                <h3>🚀 Управление тестами</h3>
+                <button class="btn" onclick="startQuickTest()">Быстрый тест</button>
+                <button class="btn" onclick="startFullTest()">Полный тест</button>
+                <button class="btn secondary" onclick="startCustomTest()">Настройка</button>
+                <button class="btn danger" onclick="stopAllTests()">Остановить все</button>
+            </div>
+            
+            <div class="control-card">
+                <h3>👥 Управление узлами</h3>
+                <button class="btn" onclick="addNode()">Добавить узел</button>
+                <button class="btn secondary" onclick="removeNode()">Удалить узел</button>
+                <button class="btn" onclick="restartNode()">Перезапустить</button>
+                <button class="btn danger" onclick="stopAllNodes()">Остановить все</button>
+            </div>
+            
+            <div class="control-card">
+                <h3>📊 Мониторинг</h3>
+                <button class="btn" onclick="refreshStatus()">Обновить статус</button>
+                <button class="btn secondary" onclick="showLogs()">Показать логи</button>
+                <button class="btn" onclick="exportResults()">Экспорт</button>
+                <button class="btn" onclick="clearResults()">Очистить</button>
+            </div>
+        </div>
+        
+        <div class="status-grid" id="nodeStatus">
+            <!-- Статус узлов будет добавлен динамически -->
+        </div>
+        
+        <div class="test-results">
+            <h3>📈 Результаты тестов</h3>
+            <div id="testProgress">
+                <p>Запустите тест для просмотра результатов</p>
+            </div>
+            
+            <div class="metrics" id="testMetrics">
+                <!-- Метрики будут добавлены динамически -->
+            </div>
+        </div>
+        
+        <div class="log-container">
+            <h3>📋 Лог тестирования</h3>
+            <div id="logContent"></div>
+        </div>
+    </div>
+
+    <script>
+        class MeshTestDashboard {
+            constructor() {
+                this.nodes = new Map();
+                this.testRunning = false;
+                this.testResults = {};
+                this.logEntries = [];
+                
+                this.initializeNodes();
+                this.startPolling();
+                this.setupEventListeners();
+            }
+            
+            initializeNodes() {
+                // Инициализация базовых узлов
+                const defaultNodes = ['Alice', 'Bob', 'Charlie', 'Diana', 'Eve'];
+                
+                defaultNodes.forEach(name => {
+                    this.addNode(name);
+                });
+                
+                this.updateNodeDisplay();
+            }
+            
+            addNode(name) {
+                const id = name.toLowerCase();
+                this.nodes.set(id, {
+                    name: name,
+                    id: id,
+                    status: 'offline',
+                    device_id: this.generateDeviceId(),
+                    stats: {
+                        messages_sent: 0,
+                        messages_received: 0,
+                        handshakes: 0,
+                        errors: 0
+                    },
+                    last_seen: null
+                });
+                
+                this.addLog(`info`, `Узел ${name} добавлен`);
+            }
+            
+            removeNode(nodeId) {
+                if (this.nodes.has(nodeId)) {
+                    const name = this.nodes.get(nodeId).name;
+                    this.nodes.delete(nodeId);
+                    this.addLog(`info`, `Узел ${name} удален`);
+                    this.updateNodeDisplay();
+                }
+            }
+            
+            generateDeviceId() {
+                return Math.random().toString(36).substring(2, 18);
+            }
+            
+            updateNodeDisplay() {
+                const container = document.getElementById('nodeStatus');
+                container.innerHTML = '';
+                
+                this.nodes.forEach((node, id) => {
+                    const card = document.createElement('div');
+                    card.className = `status-card ${node.status}`;
+                    
+                    card.innerHTML = `
+                        <div class="node-name">${node.name}</div>
+                        <div class="node-id">ID: ${node.device_id}</div>
+                        <div class="metrics">
+                            <div class="metric">
+                                <div class="metric-value">${node.stats.messages_sent}</div>
+                                <div class="metric-label">Отправлено</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">${node.stats.messages_received}</div>
+                                <div class="metric-label">Получено</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">${node.stats.handshakes}</div>
+                                <div class="metric-label">Хендшейков</div>
+                            </div>
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <span style="color: ${node.status === 'online' ? '#4CAF50' : '#f44336'}">
+                                ● ${node.status === 'online' ? 'Онлайн' : 'Офлайн'}
+                            </span>
+                        </div>
+                    `;
+                    
+                    container.appendChild(card);
+                });
+            }
+            
+            async startQuickTest() {
+                if (this.testRunning) {
+                    this.addLog('error', 'Тест уже выполняется');
+                    return;
+                }
+                
+                this.testRunning = true;
+                this.addLog('info', 'Запуск быстрого теста...');
+                
+                try {
+                    const response = await fetch('/api/test/quick', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            nodes: Array.from(this.nodes.keys())
+                        })
+                    });
+                    
+                    const result = await response.json();
+                    this.handleTestResult('quick', result);
+                    
+                } catch (error) {
+                    this.addLog('error', 'Ошибка быстрого теста: ' + error.message);
+                } finally {
+                    this.testRunning = false;
+                }
+            }
+            
+            async startFullTest() {
+                if (this.testRunning) {
+                    this.addLog('error', 'Тест уже выполняется');
+                    return;
+                }
+                
+                this.testRunning = true;
+                this.addLog('info', 'Запуск полного теста...');
+                this.updateTestProgress('Подготовка теста...', 0);
+                
+                try {
+                    const tests = ['connectivity', 'offline_delivery', 'handshakes', 'performance'];
+                    let totalScore = 0;
+                    
+                    for (let i = 0; i < tests.length; i++) {
+                        const test = tests[i];
+                        this.updateTestProgress(`Выполняется ${test}...`, (i + 1) / tests.length * 100);
+                        
+                        const response = await fetch(`/api/test/${test}`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                nodes: Array.from(this.nodes.keys())
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        this.handleTestResult(test, result);
+                        totalScore += result.success_rate || 0;
+                        
+                        // Пауза между тестами
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                    
+                    const finalScore = totalScore / tests.length;
+                    this.updateTestProgress(`Тест завершен! Оценка: ${(finalScore * 100).toFixed(1)}%`, 100);
+                    this.updateMetrics(finalScore);
+                    
+                    this.addLog('success', `Полный тест завершен. Оценка: ${(finalScore * 100).toFixed(1)}%`);
+                    
+                } catch (error) {
+                    this.addLog('error', 'Ошибка полного теста: ' + error.message);
+                } finally {
+                    this.testRunning = false;
+                }
+            }
+            
+            handleTestResult(testType, result) {
+                this.testResults[testType] = result;
+                
+                // Симуляция обновления статистики узлов
+                this.nodes.forEach(node => {
+                    if (Math.random() > 0.3) {
+                        node.status = 'online';
+                        node.stats.messages_sent += Math.floor(Math.random() * 5);
+                        node.stats.messages_received += Math.floor(Math.random() * 5);
+                        node.stats.handshakes += Math.floor(Math.random() * 3);
+                    }
+                });
+                
+                this.updateNodeDisplay();
+                
+                this.addLog('success', `Тест ${testType}: ${(result.success_rate * 100).toFixed(1)}%`);
+            }
+            
+            updateTestProgress(message, percentage) {
+                const container = document.getElementById('testProgress');
+                container.innerHTML = `
+                    <p>${message}</p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${percentage}%"></div>
+                    </div>
+                `;
+            }
+            
+            updateMetrics(score) {
+                const container = document.getElementById('testMetrics');
+                container.innerHTML = `
+                    <div class="metric">
+                        <div class="metric-value">${(score * 100).toFixed(1)}%</div>
+                        <div class="metric-label">Общая оценка</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${this.nodes.size}</div>
+                        <div class="metric-label">Активных узлов</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${Object.keys(this.testResults).length}</div>
+                        <div class="metric-label">Тестов выполнено</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">${this.logEntries.length}</div>
+                        <div class="metric-label">Лог-записей</div>
+                    </div>
+                `;
+            }
+            
+            addLog(type, message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const entry = {
+                    timestamp,
+                    type,
+                    message
+                };
+                
+                this.logEntries.unshift(entry);
+                
+                // Ограничить количество записей
+                if (this.logEntries.length > 100) {
+                    this.logEntries.pop();
+                }
+                
+                this.updateLogDisplay();
+            }
+            
+            updateLogDisplay() {
+                const container = document.getElementById('logContent');
+                container.innerHTML = this.logEntries.map(entry => `
+                    <div class="log-entry ${entry.type}">
+                        <span class="timestamp">${entry.timestamp}</span>${entry.message}
+                    </div>
+                `).join('');
+            }
+            
+            startPolling() {
+                // Симуляция обновления статуса
+                setInterval(() => {
+                    if (this.testRunning) return;
+                    
+                    // Случайное обновление статуса узлов
+                    this.nodes.forEach(node => {
+                        if (Math.random() > 0.8) {
+                            node.status = node.status === 'online' ? 'offline' : 'online';
+                            node.last_seen = new Date();
+                        }
+                    });
+                    
+                    this.updateNodeDisplay();
+                }, 5000);
+            }
+            
+            setupEventListeners() {
+                // Обработка клавиатурных сокращений
+                document.addEventListener('keydown', (e) => {
+                    if (e.ctrlKey) {
+                        switch(e.key) {
+                            case 'q':
+                                e.preventDefault();
+                                this.startQuickTest();
+                                break;
+                            case 'f':
+                                e.preventDefault();
+                                this.startFullTest();
+                                break;
+                            case 's':
+                                e.preventDefault();
+                                this.stopAllTests();
+                                break;
+                        }
+                    }
+                });
+            }
+            
+            async stopAllTests() {
+                this.testRunning = false;
+                this.addLog('info', 'Все тесты остановлены');
+                
+                try {
+                    await fetch('/api/test/stop', {method: 'POST'});
+                } catch (error) {
+                    console.log('Ошибка остановки тестов:', error);
+                }
+            }
+            
+            async refreshStatus() {
+                this.addLog('info', 'Обновление статуса...');
+                
+                // Симуляция обновления
+                this.nodes.forEach(node => {
+                    node.status = 'online';
+                    node.last_seen = new Date();
+                });
+                
+                this.updateNodeDisplay();
+                this.addLog('success', 'Статус обновлен');
+            }
+            
+            exportResults() {
+                const results = {
+                    timestamp: new Date().toISOString(),
+                    nodes: Array.from(this.nodes.values()),
+                    test_results: this.testResults,
+                    logs: this.logEntries
+                };
+                
+                const blob = new Blob([JSON.stringify(results, null, 2)], {
+                    type: 'application/json'
+                });
+                
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `mesh_test_results_${Date.now()}.json`;
+                a.click();
+                
+                URL.revokeObjectURL(url);
+                this.addLog('success', 'Результаты экспортированы');
+            }
+            
+            clearResults() {
+                this.testResults = {};
+                this.logEntries = [];
+                this.updateTestProgress('Результаты очищены', 0);
+                this.updateMetrics(0);
+                this.updateLogDisplay();
+                this.addLog('info', 'Результаты очищены');
+            }
+        }
+        
+        // Глобальные функции для кнопок
+        let dashboard;
+        
+        function startQuickTest() { dashboard.startQuickTest(); }
+        function startFullTest() { dashboard.startFullTest(); }
+        function startCustomTest() { dashboard.addLog('info', 'Настройка теста (в разработке)'); }
+        function stopAllTests() { dashboard.stopAllTests(); }
+        function addNode() {
+            const name = prompt('Введите имя узла:');
+            if (name) {
+                dashboard.addNode(name);
+                dashboard.updateNodeDisplay();
+            }
+        }
+        function removeNode() {
+            const name = prompt('Введите имя узла для удаления:');
+            if (name) {
+                dashboard.removeNode(name.toLowerCase());
+            }
+        }
+        function restartNode() {
+            dashboard.addLog('info', 'Перезапуск узла (в разработке)');
+        }
+        function stopAllNodes() {
+            dashboard.nodes.forEach(node => node.status = 'offline');
+            dashboard.updateNodeDisplay();
+            dashboard.addLog('info', 'Все узлы остановлены');
+        }
+        function refreshStatus() { dashboard.refreshStatus(); }
+        function showLogs() { dashboard.addLog('info', 'Логи показаны в панели ниже'); }
+        function exportResults() { dashboard.exportResults(); }
+        function clearResults() { dashboard.clearResults(); }
+        
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', () => {
+            dashboard = new MeshTestDashboard();
+            
+            // Добавить подсказки
+            console.log('🎮 Горячие клавиши:');
+            console.log('  Ctrl+Q - Быстрый тест');
+            console.log('  Ctrl+F - Полный тест');
+            console.log('  Ctrl+S - Остановить тесты');
+        });
+    </script>
+</body>
+</html>

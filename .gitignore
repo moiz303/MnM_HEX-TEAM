@@ -69,6 +69,15 @@ node_modules/
 test_*.txt
 integration_test.txt
 
+# Test logs
+tests/logs/
+tests/test_logs/
+*.test.log
+
+# Test reports
+tests/reports/
+test_report_*.json
+
 # IDE and editor files
 *.swp
 *.swo

@@ -70,6 +70,17 @@ class MessageType(str, Enum):
     DHT_FIND_VALUE = "dht_find_value"
     DHT_FOUND_VALUE = "dht_found_value"
 
+    # Mesh-сеть и ретрансляция
+    MESSAGE_RELAY = "message_relay"
+    MESSAGE_STORE = "message_store"
+    MESSAGE_FORWARD = "message_forward"
+    QUEUE_STORE = "queue_store"
+    QUEUE_REQUEST = "queue_request"
+    QUEUE_SYNC = "queue_sync"
+    RELAY_STATUS_UPDATE = "relay_status_update"
+    ID_CONFLICT = "id_conflict"
+    ID_RESOLUTION = "id_resolution"
+
     # Системные
     PING = "ping"
     PONG = "pong"
@@ -182,6 +193,18 @@ class MessageSchemas:
     FILE_OFFER = {**BASE, "type": MessageType.FILE_OFFER, "chat_id": str, "file_id": str, "filename": str, "size": int, "mime_type": str, "encrypted_metadata": str}
     FILE_ACCEPT = {**BASE, "type": MessageType.FILE_ACCEPT, "chat_id": str, "file_id": str, "port": int}
     FILE_CHUNK = {**BASE, "type": MessageType.FILE_CHUNK, "file_id": str, "chunk_index": int, "total_chunks": int, "data": str, "checksum": str}
+    
+    # Mesh-сеть сообщения
+    MESSAGE_RELAY = {**BASE, "type": MessageType.MESSAGE_RELAY, "target_id": str, "original_sender": str, "path": list, "ttl": int, "encrypted_payload": str}
+    MESSAGE_STORE = {**BASE, "type": MessageType.MESSAGE_STORE, "target_id": str, "original_sender": str, "message_data": dict, "priority": int, "ttl": int}
+    MESSAGE_FORWARD = {**BASE, "type": MessageType.MESSAGE_FORWARD, "target_id": str, "stored_message_id": str, "forward_path": list}
+    QUEUE_STORE = {**BASE, "type": MessageType.QUEUE_STORE, "target_id": str, "message_id": str, "expires_at": float}
+    QUEUE_REQUEST = {**BASE, "type": MessageType.QUEUE_REQUEST, "requester_id": str, "since_timestamp": float}
+    QUEUE_SYNC = {**BASE, "type": MessageType.QUEUE_SYNC, "queue_data": dict, "sync_timestamp": float}
+    RELAY_STATUS_UPDATE = {**BASE, "type": MessageType.RELAY_STATUS_UPDATE, "relay_id": str, "capacity": int, "current_load": int, "reputation": float}
+    ID_CONFLICT = {**BASE, "type": MessageType.ID_CONFLICT, "conflicting_id": str, "claimant_info": dict}
+    ID_RESOLUTION = {**BASE, "type": MessageType.ID_RESOLUTION, "resolved_id": str, "resolution_type": str}
+    
     PING = {**BASE, "type": MessageType.PING}
     PONG = {**BASE, "type": MessageType.PONG, "in_response_to": str}
     ERROR = {**BASE, "type": MessageType.ERROR, "in_response_to": str, "error_code": int, "error_message": str}
@@ -224,6 +247,46 @@ class QueuedMessage:
     attempts: int
     last_attempt: float
     created: float
+
+
+@dataclass
+class RelayNode:
+    """Информация о ретрансляторе"""
+    node_id: str
+    ip: str
+    port: int
+    capacity: int
+    current_load: int
+    reputation: float
+    stored_messages: List[str]
+    connected_peers: List[str]
+    last_seen: float
+    is_active: bool = True
+
+
+@dataclass
+class MeshMessage:
+    """Сообщение в mesh-сети"""
+    message_id: str
+    original_sender: str
+    target_id: str
+    encrypted_payload: str
+    path: List[str]
+    ttl: int
+    priority: int
+    created: float
+    expires_at: float
+
+
+@dataclass
+class MeshQueue:
+    """Очередь сообщений mesh-сети"""
+    queue_id: str
+    target_id: str
+    messages: List[MeshMessage]
+    max_size: int
+    created: float
+    last_sync: float
 
 
 class ErrorCodes:
