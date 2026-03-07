@@ -63,6 +63,12 @@ class UnixLocalAPIClient:
 def create_app():
     app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
     CORS(app)
+    
+    # Disable Flask request logging
+    app.logger.setLevel('WARNING')
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel('WARNING')
 
     # Prefer connecting to an existing LocalAPI over UNIX socket (another process).
     # If that fails, start SecureMessenger in-process and expose a LocalAPI server.

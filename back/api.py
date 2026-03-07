@@ -227,7 +227,7 @@ class LocalAPI:
 
                 time.sleep(0.1)
             except Exception as e:
-                print(f"[API] Notification error: {e}")
+                # Silently handle notification errors to avoid console spam
                 time.sleep(1)
 
     # ==================== Обработчики методов ====================
