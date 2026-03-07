@@ -186,7 +186,7 @@ def create_app():
                     chat_id = messenger.active_chats.get(peer)
                     if not chat_id:
                         return {'messages': [], 'total': 0, 'count': 0}, 200
-                    msgs = messenger.get_incoming_messages(chat_id, limit)
+                    msgs = messenger.get_conversation(chat_id, limit)
                     return {'messages': msgs, 'total': len(msgs), 'count': len(msgs)}, 200
 
                 if name == 'get_my_info':
