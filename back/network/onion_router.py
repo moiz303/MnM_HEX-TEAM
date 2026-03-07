@@ -42,6 +42,9 @@ class OnionRouter:
         if msg_type_str in ['file_offer', 'file_chunk', 'file_complete', 'file_accept', 'file_reject', 'file_error']:
             self._handle_file_message(msg_type_str, data, sender_id)
             return
+        elif msg_type_str == 'delivery_receipt':
+            self._handle_delivery_receipt(data, sender_id)
+            return
         if msg_type == 10:
             self.relay_manager.update_peer_status(sender_id, data, ('0.0.0.0', 0))
         elif msg_type == 13:
@@ -56,10 +59,21 @@ class OnionRouter:
     def _handle_file_message(self, msg_type: str, data: dict, sender_id: str):
         if msg_type == 'file_offer':
             self.file_manager.handle_file_offer(data, sender_id)
+        elif msg_type == 'file_accept':
+            self.file_manager.handle_file_accept(data, sender_id)
         elif msg_type == 'file_chunk':
             self.file_manager.handle_file_chunk(data, sender_id)
         elif msg_type == 'file_complete':
             self.file_manager.handle_file_complete(data, sender_id)
+
+    def _handle_delivery_receipt(self, data: dict, sender_id: str):
+        """Обработка delivery receipt (ACK) сообщений"""
+        in_response_to = data.get('in_response_to')
+        status = data.get('status')
+        print(f"[router] 📥 Delivery receipt from {sender_id}: msg_id={in_response_to}, status={status}")
+        
+        # Forward to file manager for chunk ACK processing
+        self.file_manager.handle_delivery_receipt(data, sender_id)
 
     def _on_file_progress(self, transfer_id: str, progress: float, bytes_transferred: int):
         print(f"📊 Transfer {transfer_id}: {progress:.1f}% ({bytes_transferred} bytes)")

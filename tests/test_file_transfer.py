@@ -8,11 +8,11 @@ import os
 import sys
 import time
 import tempfile
+
+# Добавляем путь к back директории
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'back'))
 import hashlib
 from pathlib import Path
-
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'back'))
 
 def create_test_file(size_mb=1, filename="test_file.txt"):
     """Create a test file with specified size."""
@@ -26,11 +26,11 @@ def test_backend_imports():
     print("🔍 Testing backend imports...")
     
     try:
-        from back.network.file_transfer import FileTransferManager, FileInfo, TransferSession
-        from back.network.protocols import MessageType, Limits
-        from back.core.crypto import SecureCryptoCore
-        from back.api import LocalAPI
-        from back.main import SecureMessenger
+        from network.file_transfer import FileTransferManager, FileInfo, TransferSession
+        from network.protocols import MessageType, Limits
+        from core.crypto import SecureCryptoCore
+        from api import LocalAPI
+        from main import SecureMessenger
         print("✅ All backend imports successful")
         return True
     except Exception as e:
@@ -43,7 +43,7 @@ def test_file_transfer_manager():
     
     try:
         # Import here to avoid scope issues
-        from back.network.file_transfer import FileTransferManager
+        from network.file_transfer import FileTransferManager
         
         # Mock dependencies
         class MockCrypto:
@@ -98,8 +98,8 @@ def test_chunking():
     print("\n🔍 Testing file chunking...")
     
     try:
-        from back.network.file_transfer import TransferSession, FileInfo
-        from back.network.protocols import Limits
+        from network.file_transfer import TransferSession, FileInfo
+        from network.protocols import Limits
         
         # Create test file
         test_file, _ = create_test_file(1, "test_chunk.txt")
@@ -158,7 +158,7 @@ def test_web_server():
     print("\n🔍 Testing web server...")
     
     try:
-        from back.web import create_app
+        from web import create_app
         app = create_app()
         
         with app.test_client() as client:

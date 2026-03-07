@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Integration test for complete file transfer workflow.
-Tests the actual file transfer between two mock peers.
+Integration tests for the secure P2P messenger.
+Tests the interaction between different components.
 """
 
 import os
@@ -12,8 +12,8 @@ import threading
 import hashlib
 from pathlib import Path
 
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'back'))
+# Добавляем путь к back директории
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'back'))
 
 def create_test_files():
     """Create test files of different sizes."""
@@ -41,8 +41,8 @@ def test_mock_peer_simulation():
     print("\n🔄 Testing mock peer simulation...")
     
     try:
-        from back.network.file_transfer import FileTransferManager
-        from back.network.protocols import Limits
+        from network.file_transfer import FileTransferManager
+        from network.protocols import Limits
         
         # Mock crypto for encryption
         class MockCrypto:
@@ -146,7 +146,7 @@ def test_encryption_flow():
     print("\n🔐 Testing encryption flow...")
     
     try:
-        from back.network.file_transfer import FileTransferManager
+        from network.file_transfer import FileTransferManager
         
         class TestCrypto:
             def get_session_key(self, peer_id):
@@ -199,7 +199,7 @@ def test_error_handling():
     print("\n⚠️ Testing error handling...")
     
     try:
-        from back.network.file_transfer import FileTransferManager
+        from network.file_transfer import FileTransferManager
         
         class ErrorCrypto:
             def get_session_key(self, peer_id):

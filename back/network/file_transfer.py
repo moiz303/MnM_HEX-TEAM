@@ -353,8 +353,8 @@ class FileTransferManager:
         ack_received = self._wait_for_ack(session.transfer_id, chunk.chunk_index, timeout=10.0)
         if ack_received:
             with self.transfer_lock:
-                if chunk_index not in session.completed_chunks:
-                    session.completed_chunks.append(chunk_index)
+                if chunk.chunk_index not in session.completed_chunks:
+                    session.completed_chunks.append(chunk.chunk_index)
             return True
         else:
             print(f"[file_transfer] ⚠️ No ACK for chunk {chunk.chunk_index}")
@@ -473,17 +473,70 @@ class FileTransferManager:
 
         msg = create_message(
             MessageType.FILE_ACCEPT,
-            chat_id=session.file_info.sender_id,
+            chat_id=session.file_info.sender_id,  # Use device_id as chat_id for proper routing
             file_id=transfer_id,
             port=5000
         )
 
-        # send ack/accept using stored sender IP
+        # send ack/accept using stored sender IP for routing
         if session.sender_ip:
             self._send_to_peer(session.sender_ip, msg, None)
         else:
             self._send_to_peer(session.file_info.sender_id, msg, None)
         return True
+
+    def handle_file_accept(self, data: dict, sender_id: str):
+        """Обработка подтверждения принятия файла"""
+        file_id = data.get('file_id')
+        print(f"[file_transfer] 📥 File accept received for {file_id} from {sender_id}")
+        
+        with self.transfer_lock:
+            session = self.active_transfers.get(file_id)
+            if not session:
+                print(f"[file_transfer] ❌ No transfer session found for {file_id}")
+                return
+            
+            if session.direction == 'upload':
+                print(f"[file_transfer] ✅ File {file_id} accepted by receiver, starting chunk transmission")
+                # The chunk transmission is already started in send_file method
+                # This accept is just a confirmation that receiver is ready
+            else:
+                print(f"[file_transfer] ⚠️ Received file_accept for download session, ignoring")
+
+    def handle_delivery_receipt(self, data: dict, sender_id: str):
+        """Обработка delivery receipt (ACK) для чанков"""
+        in_response_to = data.get('in_response_to')
+        status = data.get('status')
+        
+        if status != 'delivered':
+            return
+            
+        print(f"[file_transfer] 📥 Delivery receipt for message {in_response_to} from {sender_id}")
+        
+        # Find the transfer and chunk that this ACK corresponds to
+        with self.transfer_lock:
+            for transfer_id, session in self.active_transfers.items():
+                if session.direction == 'upload':
+                    # Check if this ACK matches any of our sent chunks
+                    for chunk_index, chunk in session.chunks.items():
+                        if chunk_index not in session.completed_chunks:
+                            # This might be the ACK for this chunk
+                            ack_key = f"{transfer_id}:{chunk_index}"
+                            if ack_key in self.pending_acks:
+                                print(f"[file_transfer] ✅ ACK received for chunk {chunk_index} of transfer {transfer_id}")
+                                session.completed_chunks.append(chunk_index)
+                                session.bytes_transferred += chunk.chunk_size
+                                self.stats['bytes_sent'] += chunk.chunk_size
+                                
+                                # Signal the waiting thread
+                                if ack_key in self.pending_acks:
+                                    self.pending_acks[ack_key].set()
+                                    del self.pending_acks[ack_key]
+                                
+                                # Check if transfer is complete
+                                if len(session.completed_chunks) >= session.file_info.chunk_count:
+                                    self._finalize_transfer(session, success=True)
+                                return
 
     def handle_file_chunk(self, data: dict, sender_id: str):
         """Обработка входящего чанка с улучшенной валидацией"""
