@@ -268,6 +268,15 @@ def create_app():
                     chat_id = messenger.active_chats.get(peer)
                     
                     if not chat_id:
+                        # Ищем по частичному совпадению имени (усеченные имена)
+                        for key, value in messenger.active_chats.items():
+                            if peer in key or key in peer:
+                                chat_id = value
+                                send_to = key  # Используем полный ключ для отправки
+                                print(f"[DEBUG] Found chat_id by partial match: {key} -> {chat_id}")
+                                break
+                    
+                    if not chat_id:
                         # Пробуем найти по IP если peer - это username
                         for ip, info in messenger.discovery.get_all_peers().items():
                             if info.get('username') == peer:
@@ -300,6 +309,14 @@ def create_app():
                     # Get chat_id for this peer - пробуем разные ключи
                     chat_id = messenger.active_chats.get(peer)
                     print(f"[DEBUG] chat_id by peer: {chat_id}")
+                    
+                    if not chat_id:
+                        # Ищем по частичному совпадению имени (усеченные имена)
+                        for key, value in messenger.active_chats.items():
+                            if peer in key or key in peer:
+                                chat_id = value
+                                print(f"[DEBUG] Found chat_id by partial match: {key} -> {chat_id}")
+                                break
                     
                     if not chat_id:
                         # Пробуем найти по IP если peer - это username
@@ -420,10 +437,19 @@ def create_app():
             return jsonify({'success': False, 'error': 'Invalid username'}), 400
         
         # Обновляем глобальное имя
+        old_username = globals().get('current_username', '')
         globals()['current_username'] = username
         
         # Обновляем имя в messenger если доступен
         if messenger and hasattr(messenger, 'username'):
+            # Очищаем старые active_chats если имя изменилось
+            if old_username and old_username != username and hasattr(messenger, 'active_chats'):
+                print(f'[web] Clearing old chats for username: {old_username}')
+                old_chats = {k: v for k, v in messenger.active_chats.items() if old_username in k}
+                for old_key in old_chats:
+                    del messenger.active_chats[old_key]
+                    print(f'[web] Removed chat: {old_key}')
+            
             messenger.username = username
             # Обновляем имя в discovery
             if hasattr(messenger, 'discovery'):
