@@ -328,8 +328,8 @@ class LocalAPI:
         if not chat_id:
             return {'messages': [], 'total': 0, 'count': 0}
 
-        # Запрашиваем из базы
-        messages = self.backend.db.get_conversation(chat_id, limit)
+        # Запрашиваем из базы только входящие сообщения
+        messages = self.backend.db.get_incoming_messages(chat_id, limit)
 
         result = []
         for msg in messages:

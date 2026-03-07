@@ -409,6 +409,13 @@ class SecureMessenger:
         except:
             return []
 
+    def get_incoming_messages(self, chat_id, limit=50):
+        """Получить только входящие сообщения для API"""
+        try:
+            return self.db.get_incoming_messages(chat_id, limit)
+        except:
+            return []
+
     def cleanup(self):
         """Очистка ресурсов"""
         print("\n🧹 Очистка ресурсов...")

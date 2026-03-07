@@ -182,7 +182,11 @@ def create_app():
                 if name == 'get_messages':
                     peer = params.get('peer')
                     limit = params.get('limit', 50)
-                    msgs = messenger.get_conversation(peer, limit)
+                    # Get chat_id for this peer
+                    chat_id = messenger.active_chats.get(peer)
+                    if not chat_id:
+                        return {'messages': [], 'total': 0, 'count': 0}, 200
+                    msgs = messenger.get_incoming_messages(chat_id, limit)
                     return {'messages': msgs, 'total': len(msgs), 'count': len(msgs)}, 200
 
                 if name == 'get_my_info':

@@ -104,6 +104,17 @@ class SecureDatabase:
             ''', (chat_id, limit))
             return self.cursor.fetchall()
 
+    def get_incoming_messages(self, chat_id: str, limit: int = 50) -> List[Tuple]:
+        """Получить только входящие сообщения (исключая исходящие)"""
+        with self.lock:
+            self.cursor.execute('''
+                SELECT sender, content_encrypted, timestamp, delivered
+                FROM messages 
+                WHERE chat_id=? AND direction='in'
+                ORDER BY timestamp DESC LIMIT ?
+            ''', (chat_id, limit))
+            return self.cursor.fetchall()
+
     def add_offline(self, chat_id: str, message_data: bytes) -> int:
         """Добавить сообщение в оффлайн-очередь"""
         with self.lock:
