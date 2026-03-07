@@ -1,260 +1,577 @@
-# 🔐 Secure P2P Messenger with File Transfer
+# 🔐 Secure P2P Messenger с передачей файлов
 
-A secure peer-to-peer messenger with end-to-end encryption and file transfer capabilities, built with Python and modern web technologies.
+Безопасный пиринговый мессенджер с сквозным шифрованием и возможностью передачи файлов, построенный на Python и современных веб-технологиях.
 
-## ✨ Features
+## 📋 Оглавление
 
-### 🔒 Security
-- **End-to-end encryption** using elliptic curve cryptography (ECDH)
-- **Perfect forward secrecy** with ephemeral session keys
-- **Digital signatures** for message authenticity
-- **Onion routing** for enhanced privacy
-- **Secure key exchange** with handshake protocol
+- [🔥 Возможности](#-возможности)
+- [🏗️ Архитектура проекта](#️-архитектура-проекта)
+  - [Структура бэкенда](#структура-бэкенда)
+  - [Структура фронтенда](#структура-фронтенда)
+  - [Принципы работы](#принципы-работы)
+- [🚀 Быстрый старт](#-быстрый-старт)
+- [📖 Подробное руководство по установке](#-подробное-руководство-по-установке)
+  - [Установка без Docker](#установка-без-docker)
+  - [Установка с Docker](#установка-с-docker)
+- [🔧 Конфигурация](#-конфигурация)
+- [🧪 Тестирование](#-тестирование)
+- [🔒 Детали безопасности](#-детали-безопасности)
+- [🌐 Сетевой протокол](#-сетевой-протокол)
+- [📝 Возможности расширения](#-возможности-расширения)
+- [🐛 Устранение неполадок](#-устранение-неполадок)
+- [🤝 Вклад в проект](#-вклад-в-проект)
 
-### 💬 Messaging
-- **Real-time P2P messaging** without central servers
-- **Peer discovery** via UDP broadcast
-- **Message delivery receipts** and read status
-- **System notifications** for file transfers
-- **Chat history** with local SQLite storage
+## 🔥 Возможности
 
-### 📁 File Transfer
-- **Secure file transfer** with encryption
-- **Chunked uploads** for large files
-- **Progress tracking** with real-time updates
-- **File validation** with checksums
-- **Auto-accept** for trusted peers
-- **Transfer cancellation** support
+### 🔒 Безопасность
+- **Сквозное шифрование** с использованием эллиптической криптографии (ECDH)
+- **Идеальная прямая секретность** с эфемерными ключами сессии
+- **Цифровые подписи** для проверки подлинности сообщений
+- **Onion-маршрутизация** для повышения приватности
+- **Безопасный обмен ключами** с протоколом рукопожатия
 
-### 🎨 User Interface
-- **Modern responsive web interface**
-- **Real-time updates** without page refresh
-- **File preview** and progress bars
-- **Mobile-friendly** design
-- **Dark/Light theme** support
+### 💬 Мессенджер
+- **P2P-сообщения в реальном времени** без центральных серверов
+- **Обнаружение пиров** через UDP-рассылку
+- **Квитанции о доставке** и статус прочтения
+- **Системные уведомления** для передачи файлов
+- **История чата** с локальным хранением SQLite
 
-## 🚀 Quick Start
+### 📁 Передача файлов
+- **Безопасная передача файлов** с шифрованием
+- **Чанковая загрузка** для больших файлов
+- **Отслеживание прогресса** с обновлениями в реальном времени
+- **Проверка файлов** с контрольными суммами
+- **Автопринятие** для доверенных пиров
+- **Поддержка отмены передачи**
 
-### Prerequisites
-- Python 3.8 or higher
-- pip package manager
+### 🎨 Пользовательский интерфейс
+- **Современный адаптивный веб-интерфейс**
+- **Обновления в реальном времени** без перезагрузки страницы
+- **Предпросмотр файлов** и индикаторы прогресса
+- **Мобильная совместимость**
+- **Поддержка тем** (светлая/темная)
 
-### Installation
+## 🏗️ Архитектура проекта
 
-1. **Clone the repository**
+### Структура бэкенда
+
+```
+back/
+├── main.py              # Основная логика мессенджера
+├── web.py               # Flask веб-сервер и API
+├── core/                # Криптографическое ядро
+│   ├── crypto.py        # Движок шифрования
+│   ├── secure_memory.py # Безопасная работа с памятью
+│   └── exceptions.py    # Исключения криптосистемы
+├── messaging/           # Система сообщений
+│   ├── handshake.py     # Протокол рукопожатия
+│   └── message.py       # Класс сообщений
+├── network/             # Сетевой уровень
+│   ├── connection.py    # Менеджер P2P соединений
+│   ├── onion_router.py  # Реализация onion-маршрутизации
+│   ├── file_transfer.py # Безопасная передача файлов
+│   ├── discovery.py     # Обнаружение пиров
+│   └── protocols.py     # Протоколы сообщений
+├── storage/             # Хранение данных
+│   ├── database.py      # Управление базой данных SQLite
+│   └── models.py        # Модели данных
+└── api/                 # API сервер
+    └── local_api.py     # Локальный API сервер
+```
+
+### Структура фронтенда
+
+```
+frontend/
+├── index.html           # Главная страница приложения
+├── login.html           # Страница аутентификации
+├── css/
+│   └── styles.css       # Современные адаптивные стили
+└── js/
+    └── app.js           # Интерактивная логика фронтенда
+```
+
+### Принципы работы
+
+#### 1. Криптографическая основа
+- **ECDH (Elliptic Curve Diffie-Hellman)** для обмена ключами
+- **ECDSA** для цифровых подписей
+- **AES-256-GCM** для шифрования сообщений
+- **HKDF** для вывода ключей
+- **SHA-256** для проверки целостности
+
+#### 2. P2P-архитектура
+- **Децентрализованная сеть** без центральных серверов
+- **UDP-рассылка** для обнаружения пиров в локальной сети
+- **Прямые TCP-соединения** между пирами
+- **Onion-маршрутизация** для анонимности
+
+#### 3. Протокол безопасности
+- **Трехэтапное рукопожатие** для установления соединения
+- **Эфемерные ключи** для каждой сессии
+- **Проверка подлинности** через цифровые подписи
+- **Защита от replay-атак**
+
+#### 4. Передача файлов
+- **Чанкование** файлов для надежной передачи
+- **Шифрование каждого чанка** сессионным ключом
+- **Проверка целостности** через контрольные суммы
+- **Возобновление передач** после обрыва
+
+## 🚀 Быстрый старт
+
+### Предварительные требования
+- Python 3.8 или выше
+- pip менеджер пакетов
+
+### Быстрая установка
+
+1. **Клонирование репозитория**
    ```bash
    git clone https://github.com/your-username/MnM_HEX-TEAM.git
    cd MnM_HEX-TEAM
    ```
 
-2. **Create virtual environment**
+2. **Создание виртуального окружения**
    ```bash
    python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
+   source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
    ```
 
-3. **Install dependencies**
+3. **Установка зависимостей**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Start the application**
+4. **Запуск приложения**
    ```bash
    python3 run_server.py
    ```
 
-5. **Open your browser**
-   Navigate to `http://localhost:8080`
+5. **Открытие браузера**
+   Перейдите на `http://localhost:8080`
 
-## 📖 Usage
+## 📖 Подробное руководство по установке
 
-### Basic Setup
-1. **Choose a username** when prompted
-2. **Connect to peers** on your local network
-3. **Start chatting** securely
+### Установка без Docker
 
-### File Sharing
-1. **Click the attachment icon** 📎 in chat
-2. **Select files** to upload
-3. **Monitor progress** with real-time updates
-4. **Files auto-download** for trusted peers
+#### Шаг 1: Подготовка системы
 
-### Network Configuration
-- **Default port**: 8080 (web), 8765 (P2P)
-- **Discovery**: UDP broadcast on local network
-- **Direct connection**: IP-to-IP messaging
-
-## 🏗️ Architecture
-
-### Backend (`/back`)
-```
-back/
-├── main.py              # Core messenger logic
-├── web.py               # Flask web server & API
-├── core/
-│   └── crypto.py        # Cryptographic engine
-├── messaging/
-│   └── handshake.py     # Peer handshake protocol
-├── network/
-│   ├── connection.py    # P2P connection manager
-│   ├── onion_router.py  # Onion routing implementation
-│   ├── file_transfer.py # Secure file transfer
-│   └── protocols.py     # Message protocols
-└── api/
-    └── local_api.py     # Local API server
-```
-
-### Frontend (`/frontend`)
-```
-frontend/
-├── index.html           # Main application page
-├── login.html           # User authentication
-├── css/
-│   └── styles.css       # Modern responsive styles
-└── js/
-    └── app.js           # Interactive frontend logic
-```
-
-## 🔧 Configuration
-
-### Environment Variables
+**Для Linux/macOS:**
 ```bash
-export MESSENGER_USERNAME="your_username"  # Optional: Set default username
+# Обновление пакетов
+sudo apt update && sudo apt upgrade -y  # Debian/Ubuntu
+# или
+sudo yum update -y                       # CentOS/RHEL
+
+# Установка Python и pip
+sudo apt install python3 python3-pip -y
 ```
 
-### Network Settings
-Edit `run_server.py` to customize:
-- Web server port
-- P2P communication port
-- File upload limits
-- Discovery settings
+**Для Windows:**
+1. Скачайте Python с [python.org](https://python.org)
+2. Установите с опцией "Add to PATH"
+3. Проверьте установку:
+   ```cmd
+   python --version
+   pip --version
+   ```
 
-## 🧪 Testing
+#### Шаг 2: Установка зависимостей
 
-### Run All Tests
+```bash
+# Клонирование репозитория
+git clone https://github.com/your-username/MnM_HEX-TEAM.git
+cd MnM_HEX-TEAM
+
+# Создание виртуального окружения
+python3 -m venv .venv
+
+# Активация окружения
+# Linux/macOS:
+source .venv/bin/activate
+# Windows:
+.venv\\Scripts\\activate
+
+# Установка зависимостей
+pip install -r requirements.txt
+```
+
+#### Шаг 3: Настройка конфигурации
+
+```bash
+# Создание необходимых директорий
+mkdir -p uploads downloads
+
+# Настройка прав доступа
+chmod 755 uploads downloads
+```
+
+#### Шаг 4: Запуск и проверка
+
+```bash
+# Запуск сервера
+python3 run_server.py
+
+# Проверка работоспособности
+curl http://localhost:8080
+```
+
+### Установка с Docker
+
+#### Шаг 1: Создание Dockerfile
+
+Создайте файл `Dockerfile` в корне проекта:
+
+```dockerfile
+FROM python:3.11-slim
+
+# Установка системных зависимостей
+RUN apt-get update && apt-get install -y \\
+    gcc \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Установка рабочей директории
+WORKDIR /app
+
+# Копирование файлов зависимостей
+COPY requirements.txt .
+
+# Установка Python зависимостей
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Копирование исходного кода
+COPY . .
+
+# Создание необходимых директорий
+RUN mkdir -p uploads downloads
+
+# Открытие портов
+EXPOSE 8080 8765
+
+# Запуск приложения
+CMD ["python3", "run_server.py"]
+```
+
+#### Шаг 2: Создание docker-compose.yml
+
+Создайте файл `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  messenger:
+    build: .
+    ports:
+      - "8080:8080"
+      - "8765:8765"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./downloads:/app/downloads
+      - ./secure_chat.db:/app/secure_chat.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    network_mode: host  # Для P2P обнаружения
+```
+
+#### Шаг 3: Сборка и запуск
+
+```bash
+# Сборка образа
+docker build -t secure-messenger .
+
+# Запуск через docker-compose
+docker-compose up -d
+
+# Проверка статуса
+docker-compose ps
+
+# Просмотр логов
+docker-compose logs -f messenger
+```
+
+#### Шаг 4: Проверка работы
+
+```bash
+# Проверка доступности
+curl http://localhost:8080
+
+# Вход в контейнер для отладки
+docker-compose exec messenger bash
+```
+
+## 🔧 Конфигурация
+
+### Переменные окружения
+
+```bash
+export MESSENGER_USERNAME="your_username"  # Имя пользователя по умолчанию
+export DEBUG=1                             # Режим отладки
+export MESSENGER_PORT=8080                 # Порт веб-сервера
+export P2P_PORT=8765                       # P2P порт
+```
+
+### Настройка сети
+
+Отредактируйте `run_server.py` для настройки:
+- Порт веб-сервера
+- P2P порт коммуникации
+- Лимиты загрузки файлов
+- Настройки обнаружения
+
+### База данных
+
+```bash
+# Расположение БД
+./secure_chat.db
+
+# Очистка БД
+rm secure_chat.db
+
+# Резервное копирование
+cp secure_chat.db backup_$(date +%Y%m%d).db
+```
+
+## 🧪 Тестирование
+
+### Запуск всех тестов
+
 ```bash
 python3 tests/run_all_tests.py
 ```
 
-### Individual Test Suites
+### Отдельные тестовые наборы
+
 ```bash
-python3 tests/quick_test.py                    # Basic functionality
-python3 tests/test_file_transfer.py            # File transfer system
-python3 tests/test_comprehensive_p2p.py        # P2P integration
-python3 tests/test_complete_file_transfer.py   # End-to-end transfer
+python3 tests/quick_test.py                    # Базовая функциональность
+python3 tests/test_file_transfer.py            # Система передачи файлов
+python3 tests/test_comprehensive_p2p.py        # P2P интеграция
+python3 tests/test_complete_file_transfer.py   # End-to-end передача
+python3 tests/test_integration.py              # Общая интеграция
 ```
 
-### Test Coverage
-- ✅ Cryptographic operations
-- ✅ P2P messaging
-- ✅ File transfer protocol
-- ✅ Onion routing
-- ✅ Web API endpoints
-- ✅ Frontend integration
+### Покрытие тестами
+- ✅ Криптографические операции
+- ✅ P2P сообщения
+- ✅ Протокол передачи файлов
+- ✅ Onion-маршрутизация
+- ✅ Web API эндпоинты
+- ✅ Интеграция фронтенда
 
-## 🔒 Security Details
+### Тестирование в Docker
 
-### Cryptography
-- **Curve**: secp256r1 (prime256v1)
-- **Key exchange**: ECDH with HKDF
-- **Encryption**: AES-256-GCM
-- **Signatures**: ECDSA with SHA-256
-- **Hashing**: SHA-256 for integrity
-
-### Privacy Features
-- **No central servers** - pure P2P
-- **Onion routing** for IP protection
-- **Ephemeral keys** for forward secrecy
-- **Local storage only** - no cloud exposure
-
-## 🌐 Network Protocol
-
-### Message Types
-- `HANDSHAKE_INIT` - Secure connection initiation
-- `HANDSHAKE_RESPONSE` - Handshake completion
-- `SECURE_MESSAGE` - Encrypted chat messages
-- `FILE_OFFER` - File transfer proposal
-- `FILE_CHUNK` - Encrypted file data
-- `DELIVERY_RECEIPT` - Message acknowledgment
-
-### Discovery Protocol
-- UDP broadcast on local network
-- Peer information exchange
-- Automatic peer detection
-- Device identification
-
-## 📝 Development
-
-### Adding Features
-1. **Backend**: Extend `/back/network/` modules
-2. **Frontend**: Modify `/frontend/js/app.js`
-3. **API**: Add endpoints in `/back/web.py`
-4. **Tests**: Create new test files in `/tests/`
-
-### Code Style
-- **Python**: PEP 8 compliant
-- **JavaScript**: Modern ES6+ standards
-- **CSS**: Responsive design with flexbox/grid
-- **Documentation**: Comprehensive docstrings
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Port already in use**
 ```bash
-# Kill existing processes
+# Запуск тестов в контейнере
+docker-compose run --rm messenger python3 tests/run_all_tests.py
+
+# Интерактивное тестирование
+docker-compose run --rm messenger bash
+```
+
+## 🔒 Детали безопасности
+
+### Криптография
+- **Кривая**: secp256r1 (prime256v1)
+- **Обмен ключами**: ECDH с HKDF
+- **Шифрование**: AES-256-GCM
+- **Подписи**: ECDSA с SHA-256
+- **Хеширование**: SHA-256 для целостности
+
+### Функции приватности
+- **Без центральных серверов** - чистый P2P
+- **Onion-маршрутизация** для защиты IP
+- **Эфемерные ключи** для прямой секретности
+- **Локальное хранение только** - без облачного доступа
+
+### Защита от атак
+- **Replay-атаки**: временные метки и nonce
+- **Man-in-the-middle**: проверка подписей
+- **DoS-атаки**: ограничение частоты запросов
+- **Атаки на память**: безопасное затирание данных
+
+## 🌐 Сетевой протокол
+
+### Типы сообщений
+- `HANDSHAKE_INIT` - Инициация безопасного соединения
+- `HANDSHAKE_RESPONSE` - Завершение рукопожатия
+- `SECURE_MESSAGE` - Зашифрованные сообщения чата
+- `FILE_OFFER` - Предложение передачи файла
+- `FILE_CHUNK` - Зашифрованные данные файла
+- `DELIVERY_RECEIPT` - Подтверждение доставки
+
+### Протокол обнаружения
+- UDP-рассылка в локальной сети
+- Обмен информацией о пирах
+- Автоматическое обнаружение пиров
+- Идентификация устройств
+
+### Формат сообщений
+```json
+{
+  "type": "SECURE_MESSAGE",
+  "sender_id": "device_id",
+  "timestamp": 1234567890,
+  "nonce": "random_bytes",
+  "encrypted_data": "base64_encrypted_content",
+  "signature": "base64_signature"
+}
+```
+
+## 📝 Возможности расширения
+
+### Добавление новых функций
+
+#### 1. Расширение бэкенда
+- Создайте новые модули в `/back/network/`
+- Расширьте протоколы в `/back/network/protocols.py`
+- Добавьте новые API эндпоинты в `/back/web.py`
+
+#### 2. Модификация фронтенда
+- Обновите `/frontend/js/app.js` для новой логики
+- Добавьте стили в `/frontend/css/styles.css`
+- Создайте новые HTML компоненты
+
+#### 3. Интеграция новых протоколов
+- Реализуйте новые протоколы в `/back/network/`
+- Добавьте обработчики в `/back/main.py`
+- Обновите систему сообщений
+
+### Примеры расширений
+
+#### Голосовые сообщения
+```python
+# /back/network/voice.py
+class VoiceMessageProtocol:
+    def encode_audio(self, audio_data):
+        # Кодирование аудио
+        pass
+    
+    def transmit_voice(self, peer_id, audio_chunk):
+        # Передача голоса
+        pass
+```
+
+#### Видеозвонки
+```python
+# /back/network/video.py
+class VideoCallProtocol:
+    def establish_call(self, peer_id):
+        # Установка видеозвонка
+        pass
+    
+    def stream_video(self, video_frames):
+        # Потоковая передача видео
+        pass
+```
+
+#### Плагины
+```python
+# /back/plugins/plugin_manager.py
+class PluginManager:
+    def load_plugin(self, plugin_path):
+        # Загрузка плагина
+        pass
+    
+    def execute_hook(self, hook_name, data):
+        # Вызов хуков плагинов
+        pass
+```
+
+## 🐛 Устранение неполадок
+
+### Частые проблемы
+
+**Порт уже используется**
+```bash
+# Убить существующие процессы
 lsof -ti:8080 | xargs kill -9
+lsof -ti:8765 | xargs kill -9
 python3 run_server.py
 ```
 
-**Firewall blocking**
-- Allow ports 8080 and 8765
-- Enable UDP broadcast for discovery
+**Блокировка файрволом**
+```bash
+# Linux
+sudo ufw allow 8080
+sudo ufw allow 8765
+sudo ufw allow out 8080
+sudo ufw allow out 8765
 
-**Peers not discovered**
-- Check network connectivity
-- Verify same subnet
-- Disable VPN if needed
+# macOS
+sudo pfctl -f /etc/pf.conf
+```
 
-**File transfer fails**
-- Verify sufficient disk space
-- Check file permissions
-- Ensure stable connection
+**Пиры не обнаруживаются**
+- Проверьте сетевое подключение
+- Убедитесь в одной подсети
+- Отключите VPN при необходимости
+- Проверьте настройки файрвола
 
-### Debug Mode
-Enable debug logging:
+**Передача файлов не работает**
+- Проверьте место на диске
+- Убедитесь в правах доступа к файлам
+- Проверьте стабильность соединения
+- Проверьте лимиты размера файлов
+
+### Режим отладки
+
+Включите отладочное логирование:
 ```bash
 export DEBUG=1
 python3 run_server.py
 ```
 
-## 🤝 Contributing
+### Логирование
 
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Commit changes: `git commit -am 'Add feature'`
-4. Push to branch: `git push origin feature-name`
-5. Submit pull request
+```bash
+# Просмотр логов в реальном времени
+tail -f /var/log/messenger.log
 
-## 📄 License
+# Поиск ошибок
+grep -i error /var/log/messenger.log
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+# Анализ производительности
+grep -i performance /var/log/messenger.log
+```
 
-## 🙏 Acknowledgments
+### Диагностика сети
 
-- **Cryptography**: Cryptography.io library
-- **Web Framework**: Flask with CORS support
-- **Frontend**: Vanilla JavaScript with modern APIs
-- **Testing**: Custom test framework with comprehensive coverage
+```bash
+# Проверка портов
+netstat -tulpn | grep :8080
+netstat -tulpn | grep :8765
 
-## 📞 Support
+# Тестирование соединения
+telnet localhost 8080
+telnet localhost 8765
 
-For issues and questions:
-- Create GitHub issue
-- Check troubleshooting section
-- Review test cases for examples
+# Проверка UDP-рассылки
+tcpdump -i any udp port 8765
+```
+
+## 🤝 Вклад в проект
+
+1. Форкните репозиторий
+2. Создайте ветку функционала: `git checkout -b feature-name`
+3. Закоммитьте изменения: `git commit -am 'Add feature'`
+4. Отправьте в ветку: `git push origin feature-name`
+5. Отправьте pull request
+
+### Стандарты кода
+- **Python**: соответствие PEP 8
+- **JavaScript**: современные стандарты ES6+
+- **CSS**: адаптивный дизайн с flexbox/grid
+- **Документация**: исчерпывающие docstrings
+
+### Процесс ревью
+1. Автоматические тесты должны проходить
+2. Код должен соответствовать стандартам
+3. Документация должна быть обновлена
+4. Безопасность должна быть учтена
 
 ---
 
-**🔐 Secure P2P Messenger** - Communicate freely, securely, and without central control.
+**🔐 Secure P2P Messenger** - Общайтесь свободно, безопасно и без центрального контроля.
