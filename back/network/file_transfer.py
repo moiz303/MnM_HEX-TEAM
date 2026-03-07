@@ -428,6 +428,9 @@ class FileTransferManager:
         encrypted_metadata = data.get('encrypted_metadata', '')
         metadata = self._decrypt_metadata(encrypted_metadata, sender_id)
 
+        # Normalize sender_id to get the actual device_id for encryption
+        actual_sender_device_id = self._normalize_sender_id(sender_id)
+
         session = TransferSession(
             transfer_id=file_id,
             file_info=FileInfo(
@@ -437,13 +440,13 @@ class FileTransferManager:
                 file_hash=metadata.get('file_hash', ''),
                 mime_type=data.get('mime_type', 'application/octet-stream'),
                 chunk_count=metadata.get('chunk_count', 0),
-                sender_id=sender_id,
+                sender_id=actual_sender_device_id,  # Use device_id instead of IP
                 receiver_id=self.conn_mgr.peer_id if hasattr(self.conn_mgr, 'peer_id') else 'unknown'
             ),
             status='pending',
             direction='download',
             local_path=str(self.download_dir / filename),
-            sender_ip=sender_id
+            sender_ip=sender_id  # Keep original IP for routing
         )
 
         with self.transfer_lock:
@@ -504,14 +507,14 @@ class FileTransferManager:
             print(f"[file_transfer] ❌ Chunk data too large: {len(chunk_data_hex)} chars")
             return
 
-        # Normalize sender_id to get the actual device_id for encryption
-        actual_sender_id = self._normalize_sender_id(sender_id)
-
         with self.transfer_lock:
             session = self.active_transfers.get(transfer_id)
             if not session:
                 print(f"[file_transfer] no session found for transfer_id={transfer_id}, available: {list(self.active_transfers.keys())}")
                 return
+
+            # Use the device_id from the session for encryption (already normalized)
+            actual_sender_id = session.file_info.sender_id
 
             # Проверка дубликатов
             if chunk_index in session.completed_chunks:
@@ -614,9 +617,58 @@ class FileTransferManager:
             device_id = self._find_device_id_by_ip(sender_id)
             if device_id:
                 return device_id
+            else:
+                # As a fallback, try to find any session that might be associated with this IP
+                # by checking if we have any sessions where we can cross-reference
+                device_id = self._find_device_id_by_session_lookup(sender_id)
+                if device_id:
+                    return device_id
         
         # Return original if we can't determine
         return sender_id
+
+    def _find_device_id_by_session_lookup(self, ip: str) -> Optional[str]:
+        """Fallback method: try to find device_id by checking existing sessions"""
+        # This is a fallback when discovery doesn't have the peer
+        # We'll try to find sessions that might be associated with this IP
+        if hasattr(self, 'router') and self.router:
+            # Try to get from router's discovery
+            discovery = getattr(self.router, 'discovery', None)
+            if discovery:
+                info = discovery.get_all_peers().get(ip)
+                if info:
+                    device_id = info.get('device_id')
+                    if device_id:
+                        return device_id
+        
+        # If we have the connection manager, try to get peer info from it
+        if hasattr(self.conn_mgr, 'discovery'):
+            discovery = self.conn_mgr.discovery
+            if discovery:
+                info = discovery.get_all_peers().get(ip)
+                if info:
+                    device_id = info.get('device_id')
+                    if device_id:
+                        return device_id
+        
+        # Additional fallback: try to find device_id from crypto sessions
+        # This is a last resort when discovery fails
+        if hasattr(self, 'crypto') and hasattr(self.crypto, '_session_keys'):
+            sessions = list(self.crypto._session_keys.values())
+            if sessions:
+                # If there's only one session, use it (most likely the correct one)
+                if len(sessions) == 1:
+                    return sessions[0].peer_id
+                else:
+                    # If multiple sessions, try to find one that's not our own device_id
+                    our_id = getattr(self.crypto, 'device_id', None)
+                    for session in sessions:
+                        if session.peer_id != our_id:
+                            return session.peer_id
+                    # If all else fails, use the first one
+                    return sessions[0].peer_id
+        
+        return None
 
     def _find_device_id_by_ip(self, ip: str) -> Optional[str]:
         """Find device_id by IP address using discovery"""
