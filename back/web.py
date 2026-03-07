@@ -243,6 +243,48 @@ def create_app():
                 if name == 'get_my_info':
                     return messenger.get_my_info() if hasattr(messenger, 'get_my_info') else {'username': messenger.username}, 200
 
+                if name == 'send_file':
+                    peer = params.get('peer')
+                    file_path = params.get('file_path')
+                    try:
+                        transfer_id = messenger.send_file(peer, file_path)
+                        return {'status': 'initiated', 'transfer_id': transfer_id}, 200
+                    except Exception as e:
+                        raise ValueError(f'send file failed: {e}')
+
+                if name == 'get_transfers':
+                    if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
+                        transfers = messenger.router.file_manager.get_all_transfers()
+                        return {'transfers': transfers, 'total': len(transfers)}, 200
+                    else:
+                        return {'transfers': [], 'total': 0}, 200
+
+                if name == 'get_transfer_info':
+                    transfer_id = params.get('transfer_id')
+                    if not transfer_id:
+                        raise ValueError('transfer_id required')
+                    if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
+                        info = messenger.router.file_manager.get_transfer_info(transfer_id)
+                        if info:
+                            return info, 200
+                        else:
+                            raise ValueError('Transfer not found')
+                    else:
+                        raise ValueError('File transfer manager not available')
+
+                if name == 'cancel_transfer':
+                    transfer_id = params.get('transfer_id')
+                    if not transfer_id:
+                        raise ValueError('transfer_id required')
+                    if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
+                        success = messenger.router.file_manager.cancel_transfer(transfer_id)
+                        if success:
+                            return {'status': 'cancelled', 'transfer_id': transfer_id}, 200
+                        else:
+                            raise ValueError('Failed to cancel transfer')
+                    else:
+                        raise ValueError('File transfer manager not available')
+
             except Exception as e:
                 return {'error': str(e)}, 400
 
@@ -282,6 +324,27 @@ def create_app():
     def api_my_info():
         res, code = call_handler('get_my_info', {})
         return jsonify(res), code
+
+    @app.route('/api/send_file', methods=['POST'])
+    def api_send_file():
+        data = request.get_json(force=True) or {}
+        res, code = call_handler('send_file', data)
+        return jsonify(res), code
+
+    @app.route('/api/transfers', methods=['GET'])
+    def api_transfers():
+        res, code = call_handler('get_transfers', {})
+        return jsonify(res), code
+
+    @app.route('/api/transfer/<transfer_id>', methods=['GET'])
+    def api_transfer_info(transfer_id):
+        res, code = call_handler('get_transfer_info', {'transfer_id': transfer_id})
+        return jsonify(res), code
+
+    @app.route('/api/transfer/<transfer_id>/cancel', methods=['POST'])
+    def api_cancel_transfer(transfer_id):
+        res, code = call_handler('cancel_transfer', {'transfer_id': transfer_id})
+        return jsonify(res), code)
 
     @app.route('/api/debug_backend', methods=['GET'])
     def api_debug_backend():
