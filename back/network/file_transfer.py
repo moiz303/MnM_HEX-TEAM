@@ -324,9 +324,12 @@ class FileTransferManager:
         chunk_hash = data.get('checksum')
         chunk_data_hex = data.get('data', '')
 
+        print(f"[file_transfer] handle_file_chunk called: transfer_id={transfer_id}, chunk_index={chunk_index}, sender_id={sender_id}")
+
         with self.transfer_lock:
             session = self.active_transfers.get(transfer_id)
             if not session:
+                print(f"[file_transfer] no session found for transfer_id={transfer_id}, available: {list(self.active_transfers.keys())}")
                 return
 
             try:

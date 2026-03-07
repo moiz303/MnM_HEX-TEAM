@@ -79,6 +79,7 @@ class SecureMessenger:
 
     def _on_message(self, data: dict, addr: tuple):
         msg_type = data.get('type')
+        print(f"[main] _on_message called: type={msg_type}, addr={addr[0]}")
         try:
             if msg_type == MessageType.HANDSHAKE_INIT:
                 print(f"\n📥 Получен handshake INIT от {addr[0]}")
