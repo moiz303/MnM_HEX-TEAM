@@ -1194,7 +1194,9 @@ class FileTransferManager:
         """Валидация пути к файлу"""
         try:
             path = Path(file_path)
+            abs_path = os.path.abspath(file_path)
             print(f"[file_transfer] 🔍 Validating path: {file_path}")
+            print(f"[file_transfer] 📍 Absolute path: {abs_path}")
             
             # Проверка на path traversal
             if '..' in path.parts:
@@ -1208,10 +1210,15 @@ class FileTransferManager:
                 base_dir = base_dir.replace('\\', '/')  # Normalize for cross-platform
                 print(f"[file_transfer] 📁 Base directory: {base_dir}")
                 
-                return False
+                # Проверяем что файл находится в директории проекта или в uploads
+                if abs_path.startswith(base_dir) and '/uploads/' in abs_path:
+                    print(f"[file_transfer] ✅ File path is valid: {abs_path}")
+                    return True
+                else:
+                    print(f"[file_transfer] ❌ File path outside allowed directory: {abs_path}")
+                    return False
             
             # Check if file exists and is readable
-            abs_path = os.path.abspath(file_path)
             if not os.path.exists(abs_path):
                 print(f"[file_transfer] ❌ File does not exist: {abs_path}")
                 return False
