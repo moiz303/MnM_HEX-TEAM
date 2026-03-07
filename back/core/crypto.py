@@ -502,5 +502,13 @@ class SecureCryptoCore:
                 print(f"[crypto] ✅ Found session key for {peer_id} via partial match with {session.peer_id}")
                 return session.encrypt_key.read()
         
+        # Если peer_id это IP, попробуем найти по chat_id который связан с этим IP
+        # Ищем в local_to_remote маппингах
+        for local_id, remote_id in self._local_to_remote.items():
+            if peer_id in str(remote_id) or str(remote_id) in peer_id:
+                if local_id in self._session_keys:
+                    print(f"[crypto] ✅ Found session key for {peer_id} via local_to_remote mapping {local_id} -> {remote_id}")
+                    return self._session_keys[local_id].encrypt_key.read()
+        
         print(f"[crypto] ❌ No session key found for {peer_id}")
         return None

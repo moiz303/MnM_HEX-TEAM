@@ -336,10 +336,14 @@ class FileTransferManager:
 
         dest = session.target_ip or session.file_info.receiver_id
         print(f"[file_transfer] 📡 Sending chunk {chunk.chunk_index} to {dest}")
+        print(f"[file_transfer] 📡 Session details: target_ip={session.target_ip}, receiver_id={session.file_info.receiver_id}")
+        print(f"[file_transfer] 📡 Using connection manager: {self.conn_mgr}")
         
         # Send with exponential backoff retry
         for attempt in range(3):
+            print(f"[file_transfer] 📡 Attempt {attempt + 1}/3 to send chunk {chunk.chunk_index}")
             success = self._send_to_peer(dest, msg, session.circuit_id)
+            print(f"[file_transfer] 📡 Send result: {success}")
             if success:
                 break
             print(f"[file_transfer] ⚠️ Attempt {attempt + 1} failed")
