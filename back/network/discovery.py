@@ -73,10 +73,16 @@ class PeerDiscovery:
                 'port': MESSAGE_PORT,
                 'timestamp': time.time()
             }
-            self.broadcast_socket.sendto(
-                json.dumps(presence).encode(),
-                ('<broadcast>', BROADCAST_PORT)
-            )
+            
+            # Отправляем несколько раз для надежности
+            for _ in range(3):
+                self.broadcast_socket.sendto(
+                    json.dumps(presence).encode(),
+                    ('<broadcast>', BROADCAST_PORT)
+                )
+                time.sleep(0.1)  # Небольшая задержка между отправками
+            
+            print(f"[discovery] Sent broadcast with username: {self.username}")
         except Exception as e:
             print(f"Manual broadcast error: {e}")
 

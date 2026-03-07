@@ -129,6 +129,12 @@ function changeUsername() {
                 currentUsername = username;
                 localStorage.setItem('messenger_username', username);
                 notifications.success(`Имя изменено на: ${username}`);
+                
+                // Отправляем broadcast для обновления пиров
+                fetch('/api/refresh_peers', { method: 'POST' })
+                    .then(() => console.log('Broadcast sent after username change'))
+                    .catch(e => console.log('Failed to refresh peers:', e));
+                
                 // Обновляем интерфейс если нужно
                 updateHeader();
             } else {

@@ -133,11 +133,6 @@ def create_app():
             def send_message(self, peer_name, text):
                 return False
 
-            def get_conversation(self, chat_id, limit=50):
-                return []
-
-        messenger = MockBackend()
-
     # Serve index and static files
     @app.route('/login')
     def login_page():
@@ -204,9 +199,24 @@ def create_app():
                     return info, 200
 
                 if name == 'start_chat':
-                    ok = messenger.start_chat(params.get('username'))
+                    username = params.get('username')
+                    ip = params.get('ip')
+                    
+                    # Используем IP для start_chat, но сохраняем chat_id для username
+                    ok = messenger.start_chat(ip or username)
                     if ok:
-                        return {'status': 'handshake_initiated', 'chat_id': messenger.active_chats.get(params.get('username'))}, 200
+                        # Ищем chat_id в active_chats
+                        chat_id = None
+                        for key, value in messenger.active_chats.items():
+                            if key == ip or key == username:
+                                chat_id = value
+                                break
+                        
+                        # Если нашли chat_id, сохраняем его и для username
+                        if chat_id and username:
+                            messenger.active_chats[username] = chat_id
+                        
+                        return {'status': 'handshake_initiated', 'chat_id': chat_id}, 200
                     else:
                         raise ValueError('start failed')
 
@@ -223,9 +233,33 @@ def create_app():
                     peer = params.get('peer')
                     limit = params.get('limit', 50)
                     only_incoming = params.get('only_incoming', False)
-                    # Get chat_id for this peer
+                    
+                    # Debug: покажем что в active_chats
+                    print(f"[DEBUG] active_chats: {list(messenger.active_chats.keys())}")
+                    print(f"[DEBUG] looking for peer: {peer}")
+                    
+                    # Get chat_id for this peer - пробуем разные ключи
                     chat_id = messenger.active_chats.get(peer)
+                    print(f"[DEBUG] chat_id by peer: {chat_id}")
+                    
                     if not chat_id:
+                        # Пробуем найти по IP если peer - это username
+                        for ip, info in messenger.discovery.get_all_peers().items():
+                            if info.get('username') == peer:
+                                chat_id = messenger.active_chats.get(ip)
+                                print(f"[DEBUG] chat_id by IP {ip}: {chat_id}")
+                                break
+                    if not chat_id:
+                        # Пробуем найти по username если peer - это IP
+                        for ip, info in messenger.discovery.get_all_peers().items():
+                            if ip == peer:
+                                username = info.get('username')
+                                chat_id = messenger.active_chats.get(username)
+                                print(f"[DEBUG] chat_id by username {username}: {chat_id}")
+                                break
+                    
+                    if not chat_id:
+                        print(f"[DEBUG] No chat_id found for {peer}")
                         return {'messages': [], 'total': 0, 'count': 0}, 200
                     
                     if only_incoming:
@@ -347,6 +381,26 @@ def create_app():
             'success': True, 
             'message': f'Имя установлено: {username}'
         })
+
+    @app.route('/api/refresh_peers', methods=['POST'])
+    def api_refresh_peers():
+        """Принудительно обновить broadcast для всех пиров"""
+        if messenger and hasattr(messenger, 'discovery'):
+            try:
+                messenger.discovery._broadcast_presence()
+                return jsonify({
+                    'success': True, 
+                    'message': 'Broadcast sent to refresh peers'
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False, 
+                    'error': str(e)
+                }), 500
+        return jsonify({
+            'success': False, 
+            'error': 'No messenger available'
+        }), 500
 
     @app.route('/api/my_info', methods=['GET'])
     def api_my_info():

@@ -315,6 +315,15 @@
                 
                 if (response.ok) {
                     showSuccess(`✅ ${result.message}`);
+                    
+                    // Отправляем broadcast для обновления пиров
+                    try {
+                        await fetch('/api/refresh_peers', { method: 'POST' });
+                        console.log('Broadcast sent to refresh peers');
+                    } catch (e) {
+                        console.log('Failed to refresh peers:', e);
+                    }
+                    
                     // Перенаправляем на главную страницу через 1 секунду
                     setTimeout(() => {
                         window.location.href = '/';
