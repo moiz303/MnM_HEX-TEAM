@@ -54,19 +54,44 @@ class ConnectionManager:
     def _handle_connection(self, sock: socket.socket, addr: tuple):
         """Обработка одного соединения"""
         try:
-            data = sock.recv(Limits.MAX_MESSAGE_SIZE)
-            if not data:
+            # Read message length prefix first (4 bytes)
+            sock.settimeout(10.0)
+            
+            # Read length prefix
+            length_data = b''
+            while len(length_data) < 4:
+                chunk = sock.recv(4 - len(length_data))
+                if not chunk:
+                    return
+                length_data += chunk
+            
+            message_length = int.from_bytes(length_data, byteorder='big')
+            
+            if message_length > Limits.MAX_MESSAGE_SIZE:
+                print(f"[connection] Message too large from {addr}: {message_length} bytes")
                 return
-
+            
+            # Read the actual message
+            data = b''
+            while len(data) < message_length:
+                chunk = sock.recv(min(message_length - len(data), 16384))
+                if not chunk:
+                    break
+                data += chunk
+            
+            if len(data) != message_length:
+                print(f"[connection] Incomplete message from {addr}: expected {message_length}, got {len(data)}")
+                return
+            
             message = json.loads(data.decode())
 
             if self.on_message:
                 self.on_message(message, addr)
 
-        except json.JSONDecodeError:
-            print(f"Invalid JSON from {addr}")
+        except json.JSONDecodeError as e:
+            print(f"[connection] Invalid JSON from {addr}: {e}, data size: {len(data) if 'data' in locals() else 'unknown'}")
         except Exception as e:
-            print(f"Connection error: {e}")
+            print(f"[connection] Connection error from {addr}: {e}")
         finally:
             sock.close()
 
@@ -78,13 +103,23 @@ class ConnectionManager:
             True если успешно, False если пир недоступен
         """
         try:
+            import json
+            json_data = json.dumps(data).encode()
+            
+            if len(json_data) > Limits.MAX_MESSAGE_SIZE:
+                print(f"[connection] Message to {ip} too large: {len(json_data)} > {Limits.MAX_MESSAGE_SIZE}")
+                return False
+
+            # Add length prefix (4 bytes big-endian)
+            message_with_prefix = len(json_data).to_bytes(4, byteorder='big') + json_data
+
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(Timeouts.CONNECTION)
                 sock.connect((ip, MESSAGE_PORT))
-                sock.sendall(json.dumps(data).encode())
+                sock.sendall(message_with_prefix)
                 return True
         except (socket.timeout, ConnectionRefusedError):
             return False
         except Exception as e:
-            print(f"Send error to {ip}: {e}")
+            print(f"[connection] Send error to {ip}: {e}")
             return False

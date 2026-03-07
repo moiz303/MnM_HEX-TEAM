@@ -1106,6 +1106,24 @@ body {
     color: rgba(var(--color-slate-900-rgb), 0.6);
 }
 
+.message.system {
+    justify-content: center;
+}
+
+.message.system .message-content {
+    max-width: 80%;
+}
+
+.message.system .message-bubble {
+    background: var(--color-gray-200);
+    color: var(--color-gray-400);
+    text-align: center;
+    font-style: italic;
+    font-size: 0.9em;
+    padding: 8px 12px;
+    border-radius: 12px;
+}
+
 .file-preview {
     padding: var(--space-12) var(--space-24);
     background: var(--color-surface);
@@ -1134,6 +1152,23 @@ body {
     width: var(--space-16);
     height: var(--space-16);
     color: var(--color-primary);
+}
+
+.file-status {
+    font-size: 0.8em;
+    color: var(--color-text-secondary);
+    margin-top: 4px;
+    text-align: center;
+}
+
+.file-item[data-status="completed"] .file-status {
+    color: var(--color-teal-600);
+    font-weight: 500;
+}
+
+.file-item[data-status="failed"] .file-status {
+    color: var(--color-red-500);
+    font-weight: 500;
 }
 
 .file-remove {

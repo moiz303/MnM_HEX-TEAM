@@ -10,21 +10,17 @@ from enum import Enum
 
 # ====================== СЕТЕВЫЕ ПОРТЫ ======================
 
-# Все порты в диапазоне 37020-37029 зарезервированы для приложения
 BROADCAST_PORT = 37020  # UDP для обнаружения пиров
 MESSAGE_PORT = 37021    # TCP для основных сообщений
-DHT_PORT = 37022        # TCP для DHT (задел на будущее)
-FILE_TRANSFER_PORT = 37023  # TCP для передачи файлов (задел)
-CALL_SIGNALING_PORT = 37024  # TCP для сигнализации звонков (задел)
+DHT_PORT = 37022        # TCP для DHT
+FILE_TRANSFER_PORT = 37023  # TCP для передачи файлов
+CALL_SIGNALING_PORT = 37024  # TCP для сигнализации звонков
 
 
 # ====================== ТИПЫ СООБЩЕНИЙ ======================
 
 class MessageType(str, Enum):
-    """
-    Все возможные типы сообщений в системе.
-    Используем str-наследование для удобной сериализации в JSON.
-    """
+    """Все возможные типы сообщений в системе."""
     # Обнаружение пиров (UDP broadcast)
     PRESENCE = "presence"
     PRESENCE_RESPONSE = "presence_response"
@@ -85,99 +81,80 @@ class MessageType(str, Enum):
 
 class Limits:
     """Ограничения на размеры данных"""
-
-    # Максимальные размеры сообщений
-    MAX_MESSAGE_SIZE = 64 * 1024  # 64KB
-    MAX_ENCRYPTED_SIZE = 68 * 1024  # 68KB (с учётом overhead)
-
-    # Файлы
+    MAX_MESSAGE_SIZE = 200 * 1024  # 200KB (increased for base64 encoded chunks)
+    MAX_ENCRYPTED_SIZE = 204 * 1024  # 204KB
     MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-    MAX_FILE_CHUNK = 32 * 1024  # 32KB
+    MAX_FILE_CHUNK = 16 * 1024  # 16KB (reduced to fit in message limits)
     MAX_FILENAME_LENGTH = 255
+    MAX_HOPS = 5
+    MAX_PEERS_IN_BUCKET = 20
+    MAX_CIRCUITS = 10
+    MAX_NONCE_AGE = 3600
+    MAX_SESSION_AGE = 24 * 3600
+    MAX_OFFLINE_ATTEMPTS = 10
+    MAX_OFFLINE_QUEUE = 1000
 
-    # Сеть
-    MAX_HOPS = 5  # Максимальная длина луковой цепи
-    MAX_PEERS_IN_BUCKET = 20  # Для DHT
-    MAX_CIRCUITS = 10  # Максимум одновременных цепей
 
-    # Криптография
-    MAX_NONCE_AGE = 3600  # 1 час - хранить nonce для защиты от replay
-    MAX_SESSION_AGE = 24 * 3600  # 24 часа - максимальное время жизни сессии
+@dataclass
+class RelayLimits:
+    """Лимиты для режима Mesh-by-Default"""
+    MAX_HOPS = 2
+    MAX_BANDWIDTH_KBPS = 50
+    CIRCUIT_TIMEOUT_SEC = 60
+    CLEANUP_INTERVAL_SEC = 30
+    HEARTBEAT_INTERVAL_SEC = 10
+    MAX_PENDING_CIRCUITS = 10
 
-    # Очереди
-    MAX_OFFLINE_ATTEMPTS = 10  # Максимум попыток оффлайн-доставки
-    MAX_OFFLINE_QUEUE = 1000  # Максимум сообщений в очереди
 
 # ====================== ТАЙМАУТЫ ======================
 
 class Timeouts:
     """Таймауты для различных операций (в секундах)"""
-
-    # Соединения
-    CONNECTION = 5.0  # Таймаут установки TCP соединения
-    READ = 30.0  # Таймаут чтения данных
-    WRITE = 10.0  # Таймаут записи данных
-
-    # Сокеты
-    BROADCAST = 1.0  # Таймаут broadcast сокета
-    UDP_RECV = 1.0  # Таймаут приёма UDP
-
-    # Протоколы
-    HANDSHAKE = 10.0  # Максимальное время handshake
-    DELIVERY_RECEIPT = 5.0  # Ожидание подтверждения доставки
-    PING_INTERVAL = 30.0  # Интервал ping'а
-
-    # Пиры
-    PEER_TIMEOUT = 120.0  # Считать пира оффлайн через 2 минуты
-    PEER_CLEANUP = 60.0  # Проверять пиров каждую минуту
-
-    # DHT
-    DHT_QUERY = 3.0  # Таймаут DHT запроса
-    DHT_REPLICATE = 3600.0  # Репликация DHT каждый час
+    CONNECTION = 5.0
+    READ = 30.0
+    WRITE = 10.0
+    BROADCAST = 1.0
+    UDP_RECV = 1.0
+    HANDSHAKE = 10.0
+    DELIVERY_RECEIPT = 5.0
+    PING_INTERVAL = 30.0
+    PEER_TIMEOUT = 120.0
+    PEER_CLEANUP = 60.0
+    DHT_QUERY = 3.0
+    DHT_REPLICATE = 3600.0
 
 
 # ====================== ИНТЕРВАЛЫ ======================
 
 class Intervals:
     """Интервалы для периодических операций"""
-
-    # Рассылки
-    PRESENCE_BROADCAST = 5.0  # Рассылать присутствие каждые 5 сек
-    DHT_BROADCAST = 30.0  # Рассылать DHT информацию
-
-    # Очереди
-    OFFLINE_RETRY = 30.0  # Проверять оффлайн-очередь каждые 30 сек
-    OFFLINE_BACKOFF = [30, 60, 120, 300, 600]  # Экспоненциальная задержка
-
-    # Криптография
-    KEY_ROTATION = 3600.0  # Менять ключи каждый час
-    NONCE_CLEANUP = 300.0  # Очищать старые nonce каждые 5 минут
-
-    # Статистика
-    STATS_UPDATE = 60.0  # Обновлять статистику раз в минуту
+    PRESENCE_BROADCAST = 5.0
+    DHT_BROADCAST = 30.0
+    OFFLINE_RETRY = 30.0
+    OFFLINE_BACKOFF = [30, 60, 120, 300, 600]
+    KEY_ROTATION = 3600.0
+    NONCE_CLEANUP = 300.0
+    STATS_UPDATE = 60.0
 
 
 # ====================== СТАТУСЫ ======================
 
 class PeerStatus(str, Enum):
-    """Статус пира в сети"""
     ONLINE = "online"
-    AWAY = "away"  # Недавно был, но молчит
+    AWAY = "away"
     OFFLINE = "offline"
     UNKNOWN = "unknown"
 
 
 class MessageStatus(str, Enum):
-    """Статус доставки сообщения"""
     SENT = "sent"
     DELIVERED = "delivered"
     READ = "read"
     FAILED = "failed"
-    PENDING = "pending"  # В оффлайн-очереди
+    PENDING = "pending"
 
 
 class CircuitStatus(str, Enum):
-    """Статус луковой цепи"""
     BUILDING = "building"
     READY = "ready"
     FAILED = "failed"
@@ -187,190 +164,29 @@ class CircuitStatus(str, Enum):
 # ====================== СХЕМЫ СООБЩЕНИЙ ======================
 
 class MessageSchemas:
-    """
-    Схемы валидации для всех типов сообщений.
-    Каждая схема определяет обязательные поля и их типы.
-    """
-
-    # Базовая структура всех сообщений
+    """Схемы валидации для всех типов сообщений."""
     BASE = {
-        "type": str,  # MessageType
-        "timestamp": float,  # Время отправки
-        "msg_id": str  # Уникальный ID сообщения
-    }
-
-    # Обнаружение пиров
-    PRESENCE = {
-        **BASE,
-        "type": MessageType.PRESENCE,
-        "username": str,
-        "device_id": str,
-        "public_key": str,  # base64
-        "port": int,
-        "capabilities": list  # [file_transfer, calls, etc]
-    }
-
-    PRESENCE_RESPONSE = {
-        **BASE,
-        "type": MessageType.PRESENCE_RESPONSE,
-        "username": str,
-        "device_id": str,
-        "public_key": str
-    }
-
-    # Handshake
-    HANDSHAKE_INIT = {
-        **BASE,
-        "type": MessageType.HANDSHAKE_INIT,
-        "nonce": str,  # Уникальный идентификатор handshake
-        "from": str,  # Имя отправителя
-        "device_id": str,
-        "ephemeral_public": str,  # base64 ephemeral public key
-        "signature": str  # base64 подпись эфемерного ключа
-    }
-
-    HANDSHAKE_RESPONSE = {
-        **BASE,
-        "type": MessageType.HANDSHAKE_RESPONSE,
-        "nonce": str,  # Тот же nonce из запроса
-        "from": str,
-        "device_id": str,
-        "chat_id": str,  # ID созданного чата
-        "ephemeral_public": str,
-        "signature": str
-    }
-
-    HANDSHAKE_REJECT = {
-        **BASE,
-        "type": MessageType.HANDSHAKE_REJECT,
-        "nonce": str,
-        "reason": str  # Причина отказа
-    }
-
-    # Защищённые сообщения
-    SECURE_MESSAGE = {
-        **BASE,
-        "type": MessageType.SECURE_MESSAGE,
-        "chat_id": str,
-        "encrypted": {  # Зашифрованная часть
-            "counter": int,
-            "nonce": str,
-            "iv": str,
-            "ciphertext": str,
-            "mac": str
-        }
-    }
-
-    # Внутренняя структура расшифрованного сообщения
-    DECRYPTED_MESSAGE = {
-        "content": str,  # Текст сообщения
-        "from": str,  # Отправитель
+        "type": str,
         "timestamp": float,
-        "counter": int,
-        "nonce": str,
-        "reply_to": Optional[str]  # ID сообщения, на которое отвечаем
+        "msg_id": str
     }
 
-    DELIVERY_RECEIPT = {
-        **BASE,
-        "type": MessageType.DELIVERY_RECEIPT,
-        "chat_id": str,
-        "in_response_to": str,  # msg_id исходного сообщения
-        "status": MessageStatus
-    }
+    PRESENCE = {**BASE, "type": MessageType.PRESENCE, "username": str, "device_id": str, "public_key": str, "port": int, "capabilities": list}
+    PRESENCE_RESPONSE = {**BASE, "type": MessageType.PRESENCE_RESPONSE, "username": str, "device_id": str, "public_key": str}
+    HANDSHAKE_INIT = {**BASE, "type": MessageType.HANDSHAKE_INIT, "nonce": str, "from": str, "device_id": str, "ephemeral_public": str, "signature": str}
+    HANDSHAKE_RESPONSE = {**BASE, "type": MessageType.HANDSHAKE_RESPONSE, "nonce": str, "from": str, "device_id": str, "chat_id": str, "ephemeral_public": str, "signature": str}
+    HANDSHAKE_REJECT = {**BASE, "type": MessageType.HANDSHAKE_REJECT, "nonce": str, "reason": str}
+    SECURE_MESSAGE = {**BASE, "type": MessageType.SECURE_MESSAGE, "chat_id": str, "encrypted": dict}
+    DELIVERY_RECEIPT = {**BASE, "type": MessageType.DELIVERY_RECEIPT, "chat_id": str, "in_response_to": str, "status": MessageStatus}
+    RELAY = {**BASE, "type": MessageType.RELAY, "circuit_id": str, "layer": dict}
+    FILE_OFFER = {**BASE, "type": MessageType.FILE_OFFER, "chat_id": str, "file_id": str, "filename": str, "size": int, "mime_type": str, "encrypted_metadata": str}
+    FILE_ACCEPT = {**BASE, "type": MessageType.FILE_ACCEPT, "chat_id": str, "file_id": str, "port": int}
+    FILE_CHUNK = {**BASE, "type": MessageType.FILE_CHUNK, "file_id": str, "chunk_index": int, "total_chunks": int, "data": str, "checksum": str}
+    PING = {**BASE, "type": MessageType.PING}
+    PONG = {**BASE, "type": MessageType.PONG, "in_response_to": str}
+    ERROR = {**BASE, "type": MessageType.ERROR, "in_response_to": str, "error_code": int, "error_message": str}
+    BYE = {**BASE, "type": MessageType.BYE, "reason": str}
 
-    # Луковая маршрутизация
-    RELAY = {
-        **BASE,
-        "type": MessageType.RELAY,
-        "circuit_id": str,
-        "layer": {  # Зашифрованный слой
-            "iv": str,
-            "ciphertext": str,
-            "hop_index": int
-        }
-    }
-
-    # Внутренняя структура слоя лука
-    ONION_LAYER = {
-        "next_node": Optional[str],  # Следующий узел или None
-        "payload": Any,  # Данные или следующий слой
-        "circuit_id": str
-    }
-
-    # Файлы
-    FILE_OFFER = {
-        **BASE,
-        "type": MessageType.FILE_OFFER,
-        "chat_id": str,
-        "file_id": str,  # UUID файла
-        "filename": str,
-        "size": int,
-        "mime_type": str,
-        "encrypted_metadata": str  # Зашифрованные метаданные
-    }
-
-    FILE_ACCEPT = {
-        **BASE,
-        "type": MessageType.FILE_ACCEPT,
-        "chat_id": str,
-        "file_id": str,
-        "port": int  # Порт для передачи файла
-    }
-
-    FILE_CHUNK = {
-        **BASE,
-        "type": MessageType.FILE_CHUNK,
-        "file_id": str,
-        "chunk_index": int,
-        "total_chunks": int,
-        "data": str,  # base64 chunk data
-        "checksum": str  # SHA256 chunk'а
-    }
-
-    # DHT
-    DHT_FIND_NODE = {
-        **BASE,
-        "type": MessageType.DHT_FIND_NODE,
-        "target_id": str,
-        "requester_id": str
-    }
-
-    DHT_FOUND_NODE = {
-        **BASE,
-        "type": MessageType.DHT_FOUND_NODE,
-        "target_id": str,
-        "nodes": list  # [(node_id, ip, port)]
-    }
-
-    # Системные
-    PING = {
-        **BASE,
-        "type": MessageType.PING
-    }
-
-    PONG = {
-        **BASE,
-        "type": MessageType.PONG,
-        "in_response_to": str  # msg_id ping'а
-    }
-
-    ERROR = {
-        **BASE,
-        "type": MessageType.ERROR,
-        "in_response_to": str,
-        "error_code": int,
-        "error_message": str
-    }
-
-    BYE = {
-        **BASE,
-        "type": MessageType.BYE,
-        "reason": str  # Причина отключения
-    }
-
-
-# ====================== DATACLASSES ДЛЯ СОСТОЯНИЙ ======================
 
 @dataclass
 class PeerInfo:
@@ -383,7 +199,7 @@ class PeerInfo:
     last_seen: float
     status: PeerStatus
     capabilities: list
-    rtt: Optional[float]  # Время ответа на ping
+    rtt: Optional[float]
 
 
 @dataclass
@@ -410,30 +226,20 @@ class QueuedMessage:
     created: float
 
 
-# ====================== КОДЫ ОШИБОК ======================
-
 class ErrorCodes:
     """Коды ошибок для системных сообщений"""
-
-    # Общие ошибки (1-99)
     SUCCESS = 0
     UNKNOWN_ERROR = 1
     INTERNAL_ERROR = 2
     NOT_IMPLEMENTED = 3
-
-    # Сетевые ошибки (100-199)
     PEER_UNREACHABLE = 100
     CONNECTION_TIMEOUT = 101
     CONNECTION_REFUSED = 102
     NETWORK_UNREACHABLE = 103
-
-    # Протокольные ошибки (200-299)
     INVALID_MESSAGE_TYPE = 200
     MALFORMED_MESSAGE = 201
     UNSUPPORTED_VERSION = 202
     RATE_LIMITED = 203
-
-    # Криптографические ошибки (300-399)
     HANDSHAKE_FAILED = 300
     INVALID_SIGNATURE = 301
     DECRYPTION_FAILED = 302
@@ -441,24 +247,17 @@ class ErrorCodes:
     REPLAY_ATTACK = 304
     KEY_EXPIRED = 305
     SESSION_NOT_FOUND = 306
-
-    # Ошибки аутентификации (400-499)
     UNAUTHORIZED = 400
     FORBIDDEN = 401
     PEER_REJECTED = 402
-
-    # Ошибки файлов (500-599)
     FILE_TOO_LARGE = 500
     INVALID_CHUNK = 501
     CHECKSUM_MISMATCH = 502
     INSUFFICIENT_SPACE = 503
-
-    # DHT ошибки (600-699)
     NODE_NOT_FOUND = 600
     VALUE_NOT_FOUND = 601
     STORE_FAILED = 602
 
-    # Описания ошибок
     MESSAGES = {
         SUCCESS: "Success",
         UNKNOWN_ERROR: "Unknown error",
@@ -471,102 +270,60 @@ class ErrorCodes:
 
     @classmethod
     def get_message(cls, code: int) -> str:
-        """Получить описание ошибки по коду"""
         return cls.MESSAGES.get(code, f"Unknown error code: {code}")
 
 
-# ====================== ФУНКЦИИ ВАЛИДАЦИИ ======================
-
-def validate_message(message: Dict[str, Any]) -> tuple[bool, Optional[str]]:
-    """
-    Проверить сообщение на соответствие схеме.
-    Returns: (is_valid, error_message)
-    """
+def validate_message(message: Dict[str, Any]) -> tuple:
+    """Проверить сообщение на соответствие схеме."""
     if 'type' not in message:
         return False, "Missing 'type' field"
-
     msg_type = message['type']
-
-    # Находим соответствующую схему
     schema_name = msg_type.upper()
     if not hasattr(MessageSchemas, schema_name):
         return False, f"Unknown message type: {msg_type}"
-
     schema = getattr(MessageSchemas, schema_name)
-
-    # Проверяем обязательные поля
     for field, field_type in schema.items():
         if field not in message:
             return False, f"Missing required field: {field}"
-
-        # Проверяем тип (базовая проверка)
         if field_type not in (str, int, float, bool, list, dict, type(None)):
-            # Для сложных типов пропускаем
             continue
-
         if not isinstance(message[field], field_type):
             return False, f"Field {field} should be {field_type.__name__}"
-
     return True, None
 
 
 def create_message(msg_type: MessageType, **kwargs) -> Dict[str, Any]:
-    """
-    Создать сообщение с правильной структурой.
-    Автоматически добавляет msg_id и timestamp.
-    """
+    """Создать сообщение с правильной структурой."""
     import secrets
     import time
-
     message = {
         "type": msg_type.value if isinstance(msg_type, Enum) else msg_type,
         "msg_id": secrets.token_hex(8),
         "timestamp": time.time(),
         **kwargs
     }
-
-    # Валидируем (опционально)
-    # is_valid, error = validate_message(message)
-    # if not is_valid:
-    #     raise ValueError(f"Invalid message: {error}")
-
     return message
 
 
-# ====================== КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ ======================
-
 class AppConfig:
     """Глобальная конфигурация приложения"""
-
-    # Режим отладки
     DEBUG = False
-
-    # Пути
     DB_PATH = "secure_chat.db"
     LOG_PATH = "chat.log"
-
-    # Сеть
     MAX_CONNECTIONS = 50
     BUFFER_SIZE = 65536
-
-    # Безопасность
-    ENFORCE_ENCRYPTION = True  # Не принимать незашифрованные сообщения
+    ENFORCE_ENCRYPTION = True
     AUTO_ROTATE_KEYS = True
-    REJECT_SELF_SIGNED = False  # В реальном мире - True
-
-    # Функции
+    REJECT_SELF_SIGNED = False
     ENABLE_FILE_TRANSFER = True
-    ENABLE_CALLS = False  # Пока не реализовано
+    ENABLE_CALLS = False
     ENABLE_ONION_ROUTING = True
 
     @classmethod
     def from_env(cls):
-        """Загрузить конфигурацию из переменных окружения"""
         import os
-
         if os.getenv("CHAT_DEBUG"):
             cls.DEBUG = True
         if os.getenv("CHAT_DB_PATH"):
             cls.DB_PATH = os.getenv("CHAT_DB_PATH")
-
         return cls

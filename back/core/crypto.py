@@ -121,11 +121,14 @@ class SecureCryptoCore:
             peer_id: идентификатор пира
             peer_ephemeral_bytes: байты эфемерного ключа пира (DER)
             peer_chat_id: chat_id пира (если известен, например при ответе на handshake)
+            my_ephemeral_private: эфемерный приватный ключ (если есть, для инициатора)
 
         Returns:
             local_chat_id: локальный идентификатор чата
             response_data: данные для ответа (публичный ключ и подпись)
         """
+        print(f"[crypto] 🔐 Creating secure session with peer_id: {peer_id}, peer_chat_id: {peer_chat_id}")
+        
         # Загружаем эфемерный ключ пира
         try:
             peer_ephemeral = serialization.load_der_public_key(peer_ephemeral_bytes)
@@ -190,10 +193,13 @@ class SecureCryptoCore:
         ).hexdigest()[:16]
 
         # Сохраняем сессию
+        print(f"[crypto] 💾 Saving session key: local_chat_id={local_chat_id}, peer_id={peer_id}")
         self._session_keys[local_chat_id] = SessionKeys(encrypt_key, mac_key, peer_id)
+        print(f"[crypto] ✅ Session saved. Total sessions: {len(self._session_keys)}")
 
         # Если известен chat_id пира, сохраняем маппинг
         if peer_chat_id:
+            print(f"[crypto] 🗺️ Saving mapping: {local_chat_id} <-> {peer_chat_id}")
             self._local_to_remote[local_chat_id] = peer_chat_id
             self._remote_to_local[peer_chat_id] = local_chat_id
             print(f"  📍 Маппинг: {local_chat_id[:8]} <-> {peer_chat_id[:8]}")
@@ -425,3 +431,96 @@ class SecureCryptoCore:
         # `remote_chat_id`, корректно разрешались в сессию.
         self._remote_to_local[local_chat_id] = local_chat_id
         print(f"  📍 Registered mapping: {local_chat_id[:8]} <-> {remote_chat_id[:8]} (and identity for local)")
+
+    def encrypt_with_key(self, data: bytes, key: bytes) -> bytes:
+        """Зашифровать данные с заданным ключом (для файлов)"""
+        import hashlib
+        data_hash = hashlib.sha256(data).hexdigest()
+        print(f"[crypto] encrypt_with_key: input size {len(data)}, hash {data_hash[:8]}...")
+        
+        iv = secrets.token_bytes(16)
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+
+        padder = padding.PKCS7(128).padder()
+        padded = padder.update(data) + padder.finalize()
+        ciphertext = encryptor.update(padded) + encryptor.finalize()
+
+        result = iv + ciphertext
+        print(f"[crypto] encrypt_with_key: output size {len(result)} (iv 16 + cipher {len(ciphertext)})")
+        # Возвращаем iv + ciphertext
+        return result
+
+    def decrypt_with_key(self, data: bytes, key: bytes) -> bytes:
+        """Расшифровать данные с заданным ключом (для файлов)"""
+        if len(data) < 16:
+            raise CryptoError("Data too short for IV")
+
+        iv = data[:16]
+        ciphertext = data[16:]
+
+        print(f"[crypto] decrypt_with_key: input size {len(data)}, iv {len(iv)}, cipher {len(ciphertext)}")
+
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        padded = decryptor.update(ciphertext) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(128).unpadder()
+        result = unpadder.update(padded) + unpadder.finalize()
+        
+        import hashlib
+        result_hash = hashlib.sha256(result).hexdigest()
+        print(f"[crypto] decrypt_with_key: output size {len(result)}, hash {result_hash[:8]}...")
+        return result
+
+    def get_session_key(self, peer_id: str) -> Optional[bytes]:
+        """Получить ключ сессии для peer_id (для файлов)"""
+        print(f"[crypto] 🔍 Looking for session key for peer_id: {peer_id}")
+        print(f"[crypto] 🔍 Available session keys: {len(self._session_keys)}")
+        
+        # Сначала ищем по peer_id напрямую
+        for session_id, session in self._session_keys.items():
+            print(f"[crypto] 🔍 Session {session_id}: peer_id={session.peer_id}")
+            if session.peer_id == peer_id:
+                print(f"[crypto] ✅ Found session key for {peer_id}")
+                return session.encrypt_key.read()
+        
+        # Если не нашли, ищем по маппингам
+        # Возможно peer_id это chat_id, попробуем найти по remote_to_local
+        local_chat_id = self._remote_to_local.get(peer_id)
+        if local_chat_id and local_chat_id in self._session_keys:
+            print(f"[crypto] ✅ Found session key for {peer_id} via mapping {local_chat_id}")
+            return self._session_keys[local_chat_id].encrypt_key.read()
+        
+        # Если peer_id это IP, попробуем найти сессию где peer_id содержит этот IP
+        for session_id, session in self._session_keys.items():
+            if peer_id in session.peer_id or session.peer_id in peer_id:
+                print(f"[crypto] ✅ Found session key for {peer_id} via partial match with {session.peer_id}")
+                return session.encrypt_key.read()
+        
+        # Если peer_id это IP, попробуем найти по chat_id который связан с этим IP
+        # Ищем в local_to_remote маппингах
+        for local_id, remote_id in self._local_to_remote.items():
+            if peer_id in str(remote_id) or str(remote_id) in peer_id:
+                if local_id in self._session_keys:
+                    print(f"[crypto] ✅ Found session key for {peer_id} via local_to_remote mapping {local_id} -> {remote_id}")
+                    return self._session_keys[local_id].encrypt_key.read()
+        
+        # Ищем по IP маппингам (ip_192_168_1_100)
+        ip_session_id = f"ip_{peer_id.replace('.', '_')}"
+        print(f"[crypto] 🔍 Checking IP mapping: {ip_session_id}")
+        print(f"[crypto] 🔍 Available session IDs: {list(self._session_keys.keys())}")
+        if ip_session_id in self._session_keys:
+            print(f"[crypto] ✅ Found session key for {peer_id} via IP mapping {ip_session_id}")
+            return self._session_keys[ip_session_id].encrypt_key.read()
+        
+        print(f"[crypto] ❌ No session key found for {peer_id}")
+        return None

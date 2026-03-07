@@ -4,6 +4,8 @@ let activePeer = null;
 let messages = {};
 let selectedFiles = []; // array of {file, uid}
 let messagesPollInterval = null;
+let transfersPollInterval = null;
+let activeTransfers = {}; // track transfer progress
 
 // Debug: Log when script loads
 console.log('SGram app.js loaded successfully');
@@ -329,7 +331,100 @@ async function fetchPeersPolling() {
     }
 }
 
-// Poll peers every 1s
+// Poll transfers every 2 seconds
+function startTransfersPolling() {
+    if (transfersPollInterval) clearInterval(transfersPollInterval);
+    transfersPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/transfers');
+            if (!res.ok) return;
+            const data = await res.json();
+            
+            // Update active transfers with latest status
+            data.transfers.forEach(transfer => {
+                const existing = activeTransfers[transfer.transfer_id];
+                if (!existing || existing.status !== transfer.status || existing.progress !== transfer.progress) {
+                    activeTransfers[transfer.transfer_id] = transfer;
+                    updateTransferUI(transfer);
+                    
+                    // Show completion notification
+                    if (transfer.status === 'completed' && (!existing || existing.status !== 'completed')) {
+                        showTransferNotification(transfer, 'completed');
+                    } else if (transfer.status === 'failed' && (!existing || existing.status !== 'failed')) {
+                        showTransferNotification(transfer, 'failed');
+                    }
+                }
+            });
+            
+            // Clean up completed/failed transfers after 10 seconds
+            Object.keys(activeTransfers).forEach(id => {
+                const transfer = activeTransfers[id];
+                if ((transfer.status === 'completed' || transfer.status === 'failed') && 
+                    Date.now() - transfer.updated_at > 10000) {
+                    delete activeTransfers[id];
+                }
+            });
+        } catch (e) {
+            // ignore polling errors
+        }
+    }, 2000);
+}
+
+function updateTransferUI(transfer) {
+    // Update progress bars in file preview
+    const bar = document.querySelector(`.file-item[data-transfer-id="${transfer.transfer_id}"] .file-progress-bar`);
+    if (bar) {
+        bar.style.width = `${Math.round(transfer.progress || 0)}%`;
+        if (transfer.status === 'completed') {
+            bar.style.background = 'linear-gradient(90deg, #4CAF50, #4CAF50)';
+        } else if (transfer.status === 'failed') {
+            bar.style.background = 'linear-gradient(90deg, #f44336, #f44336)';
+        }
+    }
+    
+    // Update file preview items with transfer status
+    const item = document.querySelector(`.file-item[data-transfer-id="${transfer.transfer_id}"]`);
+    if (item) {
+        item.dataset.status = transfer.status;
+        const statusText = item.querySelector('.file-status');
+        if (statusText) {
+            statusText.textContent = getTransferStatusText(transfer.status);
+        }
+    }
+}
+
+function getTransferStatusText(status) {
+    switch (status) {
+        case 'pending': return 'Ожидание...';
+        case 'in_progress': return 'Передача...';
+        case 'completed': return 'Завершено';
+        case 'failed': return 'Ошибка';
+        case 'cancelled': return 'Отменено';
+        default: return status;
+    }
+}
+
+function showTransferNotification(transfer, type) {
+    const message = type === 'completed' 
+        ? `📁 Файл "${transfer.filename}" успешно передан`
+        : `❌ Передача файла "${transfer.filename}" не удалась: ${transfer.error || 'Неизвестная ошибка'}`;
+    
+    // Add as system message to current chat if available
+    if (activePeer && messages[activePeer.username]) {
+        messages[activePeer.username].push({
+            text: message,
+            time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+            sent: false,
+            system: true
+        });
+        renderMessages();
+    }
+}
+
+// Start transfer polling when page loads
+startTransfersPolling();
+
+// Poll peers every 3s
 fetchPeersPolling();
 setInterval(fetchPeersPolling, 1000);
 
@@ -487,8 +582,8 @@ function renderMessages() {
     // Используем requestAnimationFrame для плавного рендеринга
     requestAnimationFrame(() => {
         const newHTML = msgs.map(msg => `
-            <div class="message ${msg.sent ? 'sent' : 'received'}">
-                ${!msg.sent ? `
+            <div class="message ${msg.system ? 'system' : (msg.sent ? 'sent' : 'received')}">
+                ${!msg.sent && !msg.system ? `
                     <div class="message-avatar">
                         <span>${getInitials(msg.from)}</span>
                     </div>
@@ -497,7 +592,7 @@ function renderMessages() {
                     <div class="message-bubble">${(() => {
                         const text = msg.text || '';
                         // find first URL-like token
-                        const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+)/);
+                        const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+|\/downloads\/\S+)/);
                         if (m) {
                             const url = m[0];
                             if (isImageUrl(url)) {
@@ -642,14 +737,70 @@ function sendMessage() {
                         if (bar) bar.style.width = `${Math.round(p * 100)}%`;
                     });
 
-                    if (res && res.file_url) {
-                        // send message with file link
-                        const fileMsg = `📎 ${file.name} ${res.file_url}`;
-                        fetch('/api/send_message', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
-                        }).catch(() => {});
+                    if (res && res.upload_id) {
+                        // try P2P send
+                        try {
+                            const sendRes = await fetch('/api/send_uploaded_file', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
+                            });
+                            if (sendRes.ok) {
+                                const sendData = await sendRes.json();
+                                if (sendData.transfer_id) {
+                                    // Track this transfer
+                                    activeTransfers[sendData.transfer_id] = {
+                                        transfer_id: sendData.transfer_id,
+                                        filename: file.name,
+                                        status: 'pending',
+                                        progress: 0,
+                                        direction: 'upload'
+                                    };
+                                    
+                                    // Update UI to show transfer tracking
+                                    const fileItem = document.querySelector(`.file-item[data-uid="${uid}"]`);
+                                    if (fileItem) {
+                                        fileItem.dataset.transferId = sendData.transfer_id;
+                                        const statusDiv = document.createElement('div');
+                                        statusDiv.className = 'file-status';
+                                        statusDiv.textContent = 'Ожидание...';
+                                        fileItem.appendChild(statusDiv);
+                                    }
+                                } else {
+                                    // No transfer_id but response was OK - send as link
+                                    if (res.file_url) {
+                                        const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                                        fetch('/api/send_message', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                                        }).catch(() => {});
+                                    }
+                                }
+                            } else {
+                                console.warn('P2P send failed, falling back to link');
+                                // fallback to sending link stored in res.file_url
+                                if (res.file_url) {
+                                    const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                                    fetch('/api/send_message', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                                    }).catch(() => {});
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Send file failed', err);
+                            // fallback to sending link stored in res.file_url
+                            if (res.file_url) {
+                                const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                                fetch('/api/send_message', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                                }).catch(() => {});
+                            }
+                        }
                     }
                 } catch (err) {
                     console.error('Upload failed', err);

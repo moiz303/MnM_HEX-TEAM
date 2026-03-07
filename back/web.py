@@ -1,8 +1,14 @@
+"""
+Flask web interface for Secure P2P Messenger.
+
+Provides REST API endpoints and serves frontend with file upload capabilities.
+"""
+
+import json
 import os
+import socket
 import threading
 import time
-import json
-import socket
 import uuid
 from flask import Flask, jsonify, request, send_from_directory, abort, redirect
 from flask_cors import CORS
@@ -23,18 +29,23 @@ class FrequentRequestsFilter(logging.Filter):
 
 log.addFilter(FrequentRequestsFilter())
 
-# Import backend classes (runs in-process)
+# Import backend classes
 from main import SecureMessenger
-from api import LocalAPI
+
+try:
+    from back.api import LocalAPI
+except ImportError:
+    from api import LocalAPI
 
 SOCKET_PATH = "/tmp/secure_chat.sock"
-
 BASE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
 FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend')
 
 
 class UnixLocalAPIClient:
-    def __init__(self, path):
+    """Unix socket client for LocalAPI communication."""
+    
+    def __init__(self, path: str):
         self.path = path
         self._id = 1
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -44,16 +55,20 @@ class UnixLocalAPIClient:
         except Exception:
             self.sock = None
 
-    def call(self, method, params=None):
+    def call(self, method: str, params: dict = None):
+        """Call LocalAPI method via Unix socket."""
         if not self.sock:
             raise RuntimeError('No connection to LocalAPI')
+            
         req = {'id': self._id, 'method': method, 'params': params or {}}
         self._id += 1
         data = (json.dumps(req) + '\n').encode()
+        
         self.sock.sendall(data)
         line = self.sock_file.readline()
         if not line:
             raise RuntimeError('Empty response from LocalAPI')
+            
         resp = json.loads(line.decode())
         if 'error' in resp:
             raise RuntimeError(resp['error'])
@@ -84,10 +99,30 @@ def create_app():
     remote_client = None
     messenger = None
 
+    # ВАЖНО: Для файлового трансфера всегда используем in-process LocalAPI
+    # чтобы иметь доступ к session keys из handshake
+    try:
+        messenger = SecureMessenger('web_user')
+        local_api = LocalAPI(messenger)
+        threading.Thread(target=local_api.start, daemon=True).start()
+        print('[web] Started in-process SecureMessenger for file transfer')
+        
+        # Автоматически выполняем handshake с web_user для создания session keys
+        print('[web] 🔐 Auto-initiating handshake with web_user for file transfer')
+        try:
+            messenger.start_chat('web_user')
+            print('[web] ✅ Auto-handshake completed')
+        except Exception as e:
+            print(f'[web] ⚠️ Auto-handshake failed: {e}')
+            
+    except Exception as e:
+        print(f"[web] Could not start SecureMessenger: {e}")
+
+    # Пытаемся подключиться к существующему LocalAPI для других операций
     try:
         remote_client = UnixLocalAPIClient(SOCKET_PATH)
         if remote_client.sock:
-            print('[web] Connected to existing LocalAPI via UNIX socket')
+            print('[web] Connected to existing LocalAPI via UNIX socket for messaging')
         else:
             remote_client = None
     except Exception:
@@ -150,6 +185,22 @@ def create_app():
 
             def send_message(self, peer_name, text):
                 return False
+
+    # Если messenger создан, всегда создаем local_api для него
+    if messenger and not local_api:
+        print('[web] Creating LocalAPI for messenger')
+        local_api = LocalAPI(messenger)
+        threading.Thread(target=local_api.start, daemon=True).start()
+        print('[web] Started LocalAPI for messenger')
+
+    # Используем реальный messenger если он создан, иначе создаем новый
+    if not messenger:
+        print('[web] No messenger available - cannot proceed')
+        # Но не падаем, а используем remote_client если он есть
+        if not remote_client:
+            raise RuntimeError('Cannot initialize messenger backend')
+    else:
+        print('[web] Using existing messenger instance')
 
     # Serve index and static files
     @app.route('/login')
@@ -316,6 +367,15 @@ def create_app():
                     else:
                         raise ValueError('send failed')
 
+                if name == 'send_file':
+                    peer = params.get('peer')
+                    file_path = params.get('file_path')
+                    try:
+                        transfer_id = messenger.send_file(peer, file_path)
+                        return {'status': 'initiated', 'transfer_id': transfer_id}, 200
+                    except Exception as e:
+                        raise ValueError(f'send file failed: {e}')
+
                 if name == 'get_messages':
                     peer = params.get('peer')
                     limit = params.get('limit', 50)
@@ -391,6 +451,39 @@ def create_app():
 
                 if name == 'get_my_info':
                     return messenger.get_my_info() if hasattr(messenger, 'get_my_info') else {'username': messenger.username}, 200
+
+                if name == 'get_transfers':
+                    if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
+                        transfers = messenger.router.file_manager.get_all_transfers()
+                        return {'transfers': transfers, 'total': len(transfers)}, 200
+                    else:
+                        return {'transfers': [], 'total': 0}, 200
+
+                if name == 'get_transfer_info':
+                    transfer_id = params.get('transfer_id')
+                    if not transfer_id:
+                        raise ValueError('transfer_id required')
+                    if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
+                        info = messenger.router.file_manager.get_transfer_info(transfer_id)
+                        if info:
+                            return info, 200
+                        else:
+                            raise ValueError('Transfer not found')
+                    else:
+                        raise ValueError('File transfer manager not available')
+
+                if name == 'cancel_transfer':
+                    transfer_id = params.get('transfer_id')
+                    if not transfer_id:
+                        raise ValueError('transfer_id required')
+                    if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
+                        success = messenger.router.file_manager.cancel_transfer(transfer_id)
+                        if success:
+                            return {'status': 'cancelled', 'transfer_id': transfer_id}, 200
+                        else:
+                            raise ValueError('Failed to cancel transfer')
+                    else:
+                        raise ValueError('File transfer manager not available')
 
             except Exception as e:
                 return {'error': str(e)}, 400
@@ -521,6 +614,27 @@ def create_app():
         res, code = call_handler('get_my_info', {})
         return jsonify(res), code
 
+    @app.route('/api/send_file', methods=['POST'])
+    def api_send_file():
+        data = request.get_json(force=True) or {}
+        res, code = call_handler('send_file', data)
+        return jsonify(res), code
+
+    @app.route('/api/transfers', methods=['GET'])
+    def api_transfers():
+        res, code = call_handler('get_transfers', {})
+        return jsonify(res), code
+
+    @app.route('/api/transfer/<transfer_id>', methods=['GET'])
+    def api_transfer_info(transfer_id):
+        res, code = call_handler('get_transfer_info', {'transfer_id': transfer_id})
+        return jsonify(res), code
+
+    @app.route('/api/transfer/<transfer_id>/cancel', methods=['POST'])
+    def api_cancel_transfer(transfer_id):
+        res, code = call_handler('cancel_transfer', {'transfer_id': transfer_id})
+        return jsonify(res), code
+
     @app.route('/api/debug_backend', methods=['GET'])
     def api_debug_backend():
         info = {
@@ -540,6 +654,10 @@ def create_app():
     TMP_ROOT = os.path.join(UPLOAD_ROOT, 'tmp')
     os.makedirs(TMP_ROOT, exist_ok=True)
     os.makedirs(UPLOAD_ROOT, exist_ok=True)
+
+    # Thread-safe maps for uploads
+    uploads_map = {}
+    uploads_lock = threading.Lock()
 
     @app.route('/api/upload/init', methods=['POST'])
     def api_upload_init():
@@ -632,8 +750,13 @@ def create_app():
         except Exception:
             pass
 
+        # record mapping so send_uploaded_file can find it easily
+        # Thread-safe update
+        with uploads_lock:
+            uploads_map[upload_id] = out_path
+
         file_url = f"/uploads/{out_name}"
-        return jsonify({'file_url': file_url, 'filename': safe_name}), 200
+        return jsonify({'file_url': file_url, 'filename': safe_name, 'upload_id': upload_id}), 200
 
     @app.route('/uploads/<path:filename>')
     def serve_uploaded_file(filename):
@@ -641,6 +764,70 @@ def create_app():
         if not os.path.exists(file_path):
             return abort(404)
         return send_from_directory(UPLOAD_ROOT, filename)
+
+    @app.route('/downloads/<path:filename>')
+    def serve_downloaded_file(filename):
+        download_root = os.path.join(BASE_DIR, 'downloads')
+        file_path = os.path.join(download_root, filename)
+        if not os.path.exists(file_path):
+            return abort(404)
+        return send_from_directory(download_root, filename)
+
+    @app.route('/api/send_uploaded_file', methods=['POST'])
+    def api_send_uploaded_file():
+        data = request.get_json(force=True) or {}
+        upload_id = data.get('upload_id')
+        peer = data.get('peer')
+        print(f"[web] send_uploaded_file called with upload_id={upload_id}, peer={peer}")
+        if not upload_id or not peer:
+            print(f"[web] missing data")
+            return jsonify({'error': 'upload_id and peer required'}), 400
+
+        # Thread-safe lookup with lock
+        file_path = None
+        with uploads_lock:
+            file_path = uploads_map.get(upload_id)
+            
+        if not file_path or not os.path.exists(file_path):
+            # fallback to scanning directory
+            import glob
+            pattern = os.path.join(UPLOAD_ROOT, f"{upload_id}_*")
+            print(f"[web] scanning with pattern {pattern}")
+            matches = glob.glob(pattern)
+            if not matches:
+                print(f"[web] file not found for upload_id {upload_id}")
+                return jsonify({'error': 'file not found'}), 404
+            file_path = matches[0]
+            # Thread-safe update
+            with uploads_lock:
+                uploads_map[upload_id] = file_path
+        else:
+            print(f"[web] found file_path {file_path} via map")
+
+        print(f"[web] file {file_path} exists: {os.path.exists(file_path)}, size: {os.path.getsize(file_path) if os.path.exists(file_path) else 0}")
+
+        # Additional validation
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                return jsonify({'error': 'file is empty'}), 400
+            if file_size > 200 * 1024 * 1024:  # 200MB limit
+                return jsonify({'error': 'file too large'}), 400
+        except Exception as e:
+            print(f"[web] file validation error: {e}")
+            return jsonify({'error': 'file validation failed'}), 400
+
+        # Now call send_file
+        print(f"[web] calling send_file peer={peer} path={file_path}")
+        try:
+            res, code = call_handler('send_file', {'peer': peer, 'file_path': file_path})
+            print(f"[web] send_file result {res} code {code}")
+            if code != 200:
+                print(f"[web] send_file failed with code {code}: {res}")
+            return jsonify(res), code
+        except Exception as e:
+            print(f"[web] send_file exception: {e}")
+            return jsonify({'error': f'Send file failed: {str(e)}'}), 500
 
     return app
 

@@ -133,6 +133,7 @@ class HandshakeManager:
 
         # ВАЖНО: Создаём сессию, НО мы ещё не знаем chat_id пира
         # Поэтому peer_chat_id=None, маппинг будет создан позже
+        print(f"  🔐 Creating secure session with peer_device={peer_device} (initiation)")
         local_chat_id, response_data = self.crypto.create_secure_session(
             peer_device,
             peer_ephemeral_bytes,
@@ -201,6 +202,7 @@ class HandshakeManager:
         # Используем ранее сгенерированный приватный эфемерный ключ инициатора,
         # чтобы вычислить тот же общий секрет (ECDH).
         my_ephemeral_private = handshake_data.get('ephemeral_private')
+        print(f"  🔐 Creating secure session with peer_device={peer_device}")
         local_chat_id, _ = self.crypto.create_secure_session(
             peer_device,
             peer_ephemeral_bytes,
