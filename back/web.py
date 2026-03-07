@@ -10,7 +10,8 @@ from werkzeug.utils import secure_filename
 
 # Import backend classes (runs in-process)
 from main import SecureMessenger
-from api import LocalAPI
+# use our API handler implementation rather than any unrelated package
+from back.api import APIHandler as LocalAPI
 
 SOCKET_PATH = "/tmp/secure_chat.sock"
 
@@ -136,24 +137,26 @@ def create_app():
         if local_api:
             handler = local_api.methods.get(name)
             if not handler:
-                return {'error': f'method {name} not found'}, 404
-            try:
-                if name == 'send_message':
-                    try:
-                        result = handler(params)
-                        return result, 200
-                    except Exception:
-                        # attempt handshake then retry
+                print(f"[web] local_api missing handler for {name}, falling back to messenger if available")
+            else:
+                try:
+                    if name == 'send_message':
                         try:
-                            local_api.methods.get('start_chat')({'username': params.get('peer')})
+                            result = handler(params)
+                            return result, 200
                         except Exception:
-                            pass
-                        result = handler(params)
-                        return result, 200
-                result = handler(params)
-                return result, 200
-            except Exception as e:
-                return {'error': str(e)}, 400
+                            # attempt handshake then retry
+                            try:
+                                local_api.methods.get('start_chat')({'username': params.get('peer')})
+                            except Exception:
+                                pass
+                            result = handler(params)
+                            return result, 200
+                    result = handler(params)
+                    return result, 200
+                except Exception as e:
+                    return {'error': str(e)}, 400
+    # if we reach here either local_api wasn't set, or it lacked a handler
 
         # Remote LocalAPI over unix socket
         if remote_client:

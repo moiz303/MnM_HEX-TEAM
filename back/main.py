@@ -203,16 +203,22 @@ class SecureMessenger:
         filename = session.file_info.filename
         file_size = session.file_info.file_size
         print(f"\n📥 Incoming file: {filename} ({file_size} bytes) from {sender_id}")
-        # Find sender username
+        # store a local chat message (so UI shows link)
+        # determine the username of the sender for chat_id
         sender_username = None
         for ip, info in self.discovery.get_all_peers().items():
             if info.get('device_id') == sender_id:
                 sender_username = info.get('username')
                 break
-        if sender_username and sender_username in self.active_chats:
-            # Send a message about the incoming file
-            msg_text = f"📥 Incoming file: {filename} ({file_size} bytes) - /downloads/{filename}"
-            self.send_message(sender_username, msg_text)
+        chat_id = sender_username or 'unknown'
+        try:
+            msg_id = hashlib.sha256(f"{chat_id}{time.time()}{filename}".encode()).hexdigest()[:16]
+            # plaintext content for file notification plus download link
+            link = f"/downloads/{filename}"
+            content = f"📥 Received file: {filename} ({file_size} bytes) {link}"
+            self.db.add_message(msg_id, self.active_chats.get(chat_id, 'unknown'), 'system', content.encode(), 'in')
+        except Exception as e:
+            print(f"   ⚠️ Не удалось сохранить локальное уведомление о файле: {e}")
 
     def start_chat(self, peer_name: str) -> bool:
         print(f"\n🔐 Начинаем чат с {peer_name}...")
