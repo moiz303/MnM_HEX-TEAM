@@ -93,7 +93,7 @@ class FileTransferManager:
         threading.Thread(target=self._timeout_monitor, daemon=True).start()
         threading.Thread(target=self._retry_manager, daemon=True).start()
 
-    def send_file(self, receiver_id: str, file_path: str, circuit_id: Optional[str] = None) -> str:
+    def send_file(self, receiver_ip: str, file_path: str, receiver_device_id: str, circuit_id: Optional[str] = None) -> str:
         """Инициация отправки файла."""
         path = Path(file_path)
         if not path.exists():
@@ -115,7 +115,7 @@ class FileTransferManager:
             mime_type=self._guess_mime_type(path.name),
             chunk_count=chunk_count,
             sender_id=self.conn_mgr.peer_id if hasattr(self.conn_mgr, 'peer_id') else 'unknown',
-            receiver_id=receiver_id
+            receiver_id=receiver_device_id
         )
 
         session = TransferSession(
@@ -135,7 +135,7 @@ class FileTransferManager:
 
         offer_msg = create_message(
             MessageType.FILE_OFFER,
-            chat_id=receiver_id,
+            chat_id=receiver_device_id,
             file_id=transfer_id,
             filename=file_info.filename,
             size=file_info.file_size,
@@ -146,7 +146,7 @@ class FileTransferManager:
             })
         )
 
-        self._send_to_peer(receiver_id, offer_msg, circuit_id)
+        self._send_to_peer(receiver_ip, offer_msg, circuit_id)
         session.status = 'in_progress'
         session.started_at = time.time()
 

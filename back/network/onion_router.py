@@ -29,11 +29,11 @@ class OnionRouter:
             return True
         return False
 
-    def send_file(self, target_peer_id: str, file_path: str) -> str:
+    def send_file(self, target_ip: str, file_path: str, receiver_device_id: str) -> str:
         circuit_id = None
-        if not self.connection_manager.is_peer_connected(target_peer_id):
-            circuit_id = self.relay_manager.create_mesh_circuit(target_peer_id)
-        return self.file_manager.send_file(target_peer_id, file_path, circuit_id)
+        if not self.connection_manager.is_peer_connected(target_ip):
+            circuit_id = self.relay_manager.create_mesh_circuit(receiver_device_id)
+        return self.file_manager.send_file(target_ip, file_path, receiver_device_id, circuit_id)
 
     def handle_incoming(self, msg_type, data: dict, sender_id: str):
         if isinstance(msg_type, int):

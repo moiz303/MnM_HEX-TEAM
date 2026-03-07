@@ -48,6 +48,7 @@ class SecureMessenger:
         print(f"🔌 Запуск менеджера соединений...")
         self.connection = ConnectionManager()
         self.connection.start(self._on_message)
+        self.connection.peer_id = self.device_id
 
         print(f"🧅 Инициализация Onion Router...")
         self.router = OnionRouter(self.connection, self.crypto)
@@ -93,7 +94,7 @@ class SecureMessenger:
                 self._handle_secure_message(data, addr)
             elif msg_type in [MessageType.FILE_OFFER, MessageType.FILE_ACCEPT, MessageType.FILE_CHUNK, MessageType.FILE_COMPLETE, MessageType.FILE_REJECT, MessageType.FILE_ERROR]:
                 print(f"\n📁 Получено FILE сообщение: {msg_type} от {addr[0]}")
-                self.router.handle_incoming(msg_type, data, addr[0])
+                self.router.handle_incoming(msg_type, data, data.get('from', addr[0]))
             else:
                 print(f"\n❓ Неизвестный тип сообщения: {msg_type}")
         except Exception as e:
@@ -265,7 +266,7 @@ class SecureMessenger:
         device_id = info.get('device_id')
         if not device_id:
             raise ValueError(f"Device ID for {peer_name} not found")
-        return self.router.send_file(device_id, file_path)
+        return self.router.send_file(ip, file_path, device_id)
 
     def list_peers(self):
         peers = self.discovery.get_all_peers()
