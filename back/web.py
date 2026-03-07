@@ -92,19 +92,26 @@ def create_app():
     
     username = os.getenv('MESSENGER_USERNAME')
     if not username:
-        web_user_id = str(uuid.uuid4())[:8]
-        username = f'web_user_{web_user_id}'
+        # Не генерируем случайное имя, ждем установки с фронта
+        username = None
     
-    globals()['current_username'] = username
-    print(f'[web] Current username set to: {username}')
+    if username:
+        globals()['current_username'] = username
+        print(f'[web] Current username set to: {username}')
+    else:
+        globals()['current_username'] = None
+        print(f'[web] Waiting for username from frontend')
 
     if not remote_client:
         try:
-            # Use the already initialized username
+            # Use the already initialized username (может быть None)
             messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
-            print(f'[web] Started in-process SecureMessenger as {username}')
+            if username:
+                print(f'[web] Started in-process SecureMessenger as {username}')
+            else:
+                print(f'[web] Started in-process SecureMessenger, waiting for username')
         except Exception as e:
             print(f"[web] Could not start SecureMessenger: {e}")
 
