@@ -25,7 +25,10 @@ class SecureMessenger:
     """
 
     def __init__(self, username: str):
-        self.username = username
+        if not username or not username.strip():
+            raise ValueError("Username cannot be None or empty")
+        
+        self.username = username.strip()
         self.start_time = time.time()
 
         # Генерируем device_id из имени и hostname

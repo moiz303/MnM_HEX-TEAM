@@ -108,14 +108,21 @@ def create_app():
         print(f'[web] Waiting for username from frontend')
 
     # Запускаем messenger только если есть имя
-    if not remote_client and username:
+    if not remote_client and username and username.strip():
         try:
             messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
             print(f'[web] Started in-process SecureMessenger as {username}')
+        except ValueError as e:
+            if "Username cannot be None" in str(e):
+                print('[web] Cannot start messenger without username - waiting for login')
+            else:
+                print(f"[web] Could not start SecureMessenger: {e}")
         except Exception as e:
             print(f"[web] Could not start SecureMessenger: {e}")
+    elif not remote_client:
+        print('[web] Messenger not started - waiting for username')
 
     if not local_api and not remote_client:
         print('[web] Falling back to MockBackend')
