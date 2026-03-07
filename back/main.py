@@ -54,7 +54,7 @@ class SecureMessenger:
         self.connection.peer_id = self.device_id
 
         # keep track of names user asked to handshake with (keyed by IP)
-        self.pending_chat_requests: Dict[str, str] = {}  # ip -> requested_peer_name
+        self.pending_chat_requests = {}  # ip -> requested_peer_name
 
         print(f"🧅 Инициализация Onion Router...")
         self.router = OnionRouter(self.connection, self.crypto)
