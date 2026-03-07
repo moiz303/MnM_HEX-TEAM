@@ -11,7 +11,6 @@ let currentUsername = localStorage.getItem('messenger_username') || 'user';
 // Check if user has name, if not - redirect to login
 if (!localStorage.getItem('messenger_username')) {
     window.location.href = '/login';
-    throw new Error('Redirecting to login page');
 }
 
 // Система уведомлений
@@ -272,7 +271,7 @@ function renderPeers(filter = '') {
                     item.addEventListener('click', () => {
                         const username = item.dataset.peerUsername;
                         const peer = peers.find(p => p.username === username);
-                        if (peer) selectPeer(peer);
+                        if (peer) selectPeerByUsername(peer.username);
                     });
                     item.setAttribute('data-listener', 'true');
                 }
