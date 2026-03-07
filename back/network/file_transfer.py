@@ -558,7 +558,12 @@ class FileTransferManager:
         chunk_hash = data.get('checksum')
         chunk_data_hex = data.get('data', '')
 
-        print(f"[file_transfer] handle_file_chunk called: transfer_id={transfer_id}, chunk_index={chunk_index}, sender_id={sender_id}")
+        print(f"[file_transfer] 📥 handle_file_chunk called:")
+        print(f"   - transfer_id: {transfer_id}")
+        print(f"   - chunk_index: {chunk_index}")
+        print(f"   - sender_id: {sender_id}")
+        print(f"   - chunk_hash: {chunk_hash[:8] if chunk_hash else 'None'}...")
+        print(f"   - data_size: {len(chunk_data_hex)} chars")
 
         # Валидация входных данных
         if not all([transfer_id, chunk_index is not None, chunk_hash, chunk_data_hex]):

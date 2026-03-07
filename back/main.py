@@ -277,7 +277,21 @@ class SecureMessenger:
             # Для web_user используем специальную обработку
             if peer_name == 'web_user':
                 print(f"[main] 🌐 Using web_user fallback")
-                # web_user - это локальный тест, используем IP и device_id из handshake
+                
+                # Проверяем есть ли активный чат с web_user
+                if peer_name not in self.active_chats:
+                    print(f"[main] 🤝 No active chat with {peer_name}, initiating handshake")
+                    try:
+                        # Принудительно инициируем handshake
+                        self.start_chat(peer_name)
+                        print(f"[main] ✅ Handshake initiated with {peer_name}")
+                    except Exception as e:
+                        print(f"[main] ❌ Handshake failed: {e}")
+                        raise ValueError(f"Could not establish secure session with {peer_name}")
+                else:
+                    print(f"[main] ✅ Active chat exists with {peer_name}")
+                
+                # Используем IP и device_id из handshake
                 ip = '192.168.0.231'  # Из логов handshake
                 device_id = '755c8d6420eadda1'  # Из логов handshake
                 

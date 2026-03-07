@@ -76,23 +76,25 @@ def create_app():
     remote_client = None
     messenger = None
 
+    # ВАЖНО: Для файлового трансфера всегда используем in-process LocalAPI
+    # чтобы иметь доступ к session keys из handshake
+    try:
+        messenger = SecureMessenger('web_user')
+        local_api = LocalAPI(messenger)
+        threading.Thread(target=local_api.start, daemon=True).start()
+        print('[web] Started in-process SecureMessenger for file transfer')
+    except Exception as e:
+        print(f"[web] Could not start SecureMessenger: {e}")
+
+    # Пытаемся подключиться к существующему LocalAPI для других операций
     try:
         remote_client = UnixLocalAPIClient(SOCKET_PATH)
         if remote_client.sock:
-            print('[web] Connected to existing LocalAPI via UNIX socket')
+            print('[web] Connected to existing LocalAPI via UNIX socket for messaging')
         else:
             remote_client = None
     except Exception:
         remote_client = None
-
-    if not remote_client:
-        try:
-            messenger = SecureMessenger('web_user')
-            local_api = LocalAPI(messenger)
-            threading.Thread(target=local_api.start, daemon=True).start()
-            print('[web] Started in-process SecureMessenger')
-        except Exception as e:
-            print(f"[web] Could not start SecureMessenger: {e}")
 
     if not local_api and not remote_client:
         print('[web] Falling back to MockBackend')
