@@ -11,7 +11,10 @@ from werkzeug.utils import secure_filename
 # Import backend classes (runs in-process)
 from main import SecureMessenger
 # use our API handler implementation rather than any unrelated package
-from back.api import LocalAPI
+try:
+    from back.api import LocalAPI
+except ImportError:
+    from api import LocalAPI
 
 SOCKET_PATH = "/tmp/secure_chat.sock"
 
