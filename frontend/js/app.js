@@ -268,7 +268,7 @@ function renderMessages() {
                 <div class="message-bubble">${(() => {
                     const text = msg.text || '';
                     // find first URL-like token
-                    const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+)/);
+                    const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+|\/downloads\/\S+)/);
                     if (m) {
                         const url = m[0];
                         if (isImageUrl(url)) {
@@ -344,14 +344,15 @@ function sendMessage() {
                         if (bar) bar.style.width = `${Math.round(p * 100)}%`;
                     });
 
-                    if (res && res.file_url) {
-                        // send message with file link
-                        const fileMsg = `📎 ${file.name} ${res.file_url}`;
-                        fetch('/api/send_message', {
+                    if (res && res.upload_id) {
+                        // send file via P2P
+                        fetch('/api/send_uploaded_file', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
-                        }).catch(() => {});
+                            body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
+                        }).catch((err) => {
+                            console.error('Send file failed', err);
+                        });
                     }
                 } catch (err) {
                     console.error('Upload failed', err);

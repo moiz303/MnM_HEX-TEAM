@@ -11,6 +11,7 @@ class OnionRouter:
         self.file_manager = FileTransferManager(connection_manager, crypto_core, self)
         self.file_manager.on_progress = self._on_file_progress
         self.file_manager.on_complete = self._on_file_complete
+        self.file_manager.on_file_offer = self._on_file_offer
 
     def enable(self):
         self.relay_manager.toggle_relay(True)
@@ -66,6 +67,9 @@ class OnionRouter:
 
     def _on_file_complete(self, transfer_id: str, status: str):
         print(f"🏁 Transfer {transfer_id} finished with status: {status}")
+
+    def _on_file_offer(self, session):
+        print(f"📥 Incoming file offer: {session.file_info.filename} from {session.file_info.sender_id}")
 
     def _int_to_msg_type(self, msg_type_int: int) -> str:
         mapping = {10: 'relay_status', 11: 'circuit_create', 12: 'circuit_confirm', 13: 'relay_data', 14: 'circuit_destroy'}

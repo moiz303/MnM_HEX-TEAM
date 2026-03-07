@@ -14,6 +14,7 @@ from core.crypto import SecureCryptoCore
 from core.exceptions import CryptoError
 from network.discovery import PeerDiscovery
 from network.connection import ConnectionManager
+from network.onion_router import OnionRouter
 from network.protocols import MessageType
 from storage.database import SecureDatabase
 from messaging.handshake import HandshakeManager
@@ -47,6 +48,10 @@ class SecureMessenger:
         print(f"🔌 Запуск менеджера соединений...")
         self.connection = ConnectionManager()
         self.connection.start(self._on_message)
+
+        print(f"🧅 Инициализация Onion Router...")
+        self.router = OnionRouter(self.connection, self.crypto)
+        self.router.file_manager.on_file_offer = self._on_incoming_file_offer
 
         print(f"💾 Инициализация базы данных...")
         self.db = SecureDatabase()
@@ -86,6 +91,9 @@ class SecureMessenger:
             elif msg_type == MessageType.SECURE_MESSAGE:
                 print(f"\n📥 Получено SECURE MESSAGE от {addr[0]}")
                 self._handle_secure_message(data, addr)
+            elif msg_type in [MessageType.FILE_OFFER, MessageType.FILE_ACCEPT, MessageType.FILE_CHUNK, MessageType.FILE_COMPLETE, MessageType.FILE_REJECT, MessageType.FILE_ERROR]:
+                print(f"\n📁 Получено FILE сообщение: {msg_type} от {addr[0]}")
+                self.router.handle_incoming(msg_type, data, addr[0])
             else:
                 print(f"\n❓ Неизвестный тип сообщения: {msg_type}")
         except Exception as e:
@@ -188,6 +196,22 @@ class SecureMessenger:
         except CryptoError as e:
             print(f"\n❌ Ошибка расшифровки: {e}")
 
+    def _on_incoming_file_offer(self, session):
+        sender_id = session.file_info.sender_id
+        filename = session.file_info.filename
+        file_size = session.file_info.file_size
+        print(f"\n📥 Incoming file: {filename} ({file_size} bytes) from {sender_id}")
+        # Find sender username
+        sender_username = None
+        for ip, info in self.discovery.get_all_peers().items():
+            if info.get('device_id') == sender_id:
+                sender_username = info.get('username')
+                break
+        if sender_username and sender_username in self.active_chats:
+            # Send a message about the incoming file
+        msg_text = f"📥 Incoming file: {filename} ({file_size} bytes) - /downloads/{filename}"
+            self.send_message(sender_username, msg_text)
+
     def start_chat(self, peer_name: str) -> bool:
         print(f"\n🔐 Начинаем чат с {peer_name}...")
         peer = self.discovery.get_peer_by_name(peer_name)
@@ -232,6 +256,16 @@ class SecureMessenger:
         except CryptoError as e:
             print(f"   ❌ Ошибка шифрования: {e}")
             return False
+
+    def send_file(self, peer_name: str, file_path: str) -> str:
+        peer = self.discovery.get_peer_by_name(peer_name)
+        if not peer:
+            raise ValueError(f"Peer {peer_name} not found")
+        ip, info = peer
+        device_id = info.get('device_id')
+        if not device_id:
+            raise ValueError(f"Device ID for {peer_name} not found")
+        return self.router.send_file(device_id, file_path)
 
     def list_peers(self):
         peers = self.discovery.get_all_peers()

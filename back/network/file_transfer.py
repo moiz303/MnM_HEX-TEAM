@@ -84,6 +84,7 @@ class FileTransferManager:
         self.on_progress: Optional[Callable] = None
         self.on_complete: Optional[Callable] = None
         self.on_error: Optional[Callable] = None
+        self.on_file_offer: Optional[Callable] = None
 
         self._stop_event = threading.Event()
         self._start_background_tasks()
@@ -264,7 +265,9 @@ class FileTransferManager:
         with self.transfer_lock:
             self.active_transfers[file_id] = session
 
-        print(f"📥 File offer received: {filename} ({file_size} bytes)")
+        print(f"📥 File offer received: {filename} ({file_size} bytes) from {sender_id}")
+        if self.on_file_offer:
+            self.on_file_offer(session)
         self.accept_file(file_id)
 
     def accept_file(self, transfer_id: str) -> bool:

@@ -97,6 +97,9 @@ def create_app():
             def send_message(self, peer_name, text):
                 return False
 
+            def send_file(self, peer_name, file_path):
+                return 'mock-transfer-id'
+
             def get_conversation(self, chat_id, limit=50):
                 return []
 
@@ -215,6 +218,15 @@ def create_app():
                         return {'status': 'sent', 'timestamp': time.time()}, 200
                     else:
                         raise ValueError('send failed')
+
+                if name == 'send_file':
+                    peer = params.get('peer')
+                    file_path = params.get('file_path')
+                    try:
+                        transfer_id = messenger.send_file(peer, file_path)
+                        return {'status': 'initiated', 'transfer_id': transfer_id}, 200
+                    except Exception as e:
+                        raise ValueError(f'send file failed: {e}')
 
                 if name == 'get_messages':
                     peer = params.get('peer')
@@ -377,7 +389,7 @@ def create_app():
             pass
 
         file_url = f"/uploads/{out_name}"
-        return jsonify({'file_url': file_url, 'filename': safe_name}), 200
+        return jsonify({'file_url': file_url, 'filename': safe_name, 'upload_id': upload_id}), 200
 
     @app.route('/uploads/<path:filename>')
     def serve_uploaded_file(filename):
@@ -385,6 +397,39 @@ def create_app():
         if not os.path.exists(file_path):
             return abort(404)
         return send_from_directory(UPLOAD_ROOT, filename)
+
+    @app.route('/downloads/<path:filename>')
+    def serve_downloaded_file(filename):
+        download_root = os.path.join(BASE_DIR, 'downloads')
+        file_path = os.path.join(download_root, filename)
+        if not os.path.exists(file_path):
+            return abort(404)
+        return send_from_directory(download_root, filename)
+
+    @app.route('/api/send_uploaded_file', methods=['POST'])
+    def api_send_uploaded_file():
+        data = request.get_json(force=True) or {}
+        upload_id = data.get('upload_id')
+        peer = data.get('peer')
+        if not upload_id or not peer:
+            return jsonify({'error': 'upload_id and peer required'}), 400
+
+        # Find the file path from upload_id
+        # Since we don't store meta after complete, assume the file is named with upload_id
+        # Actually, out_name = f"{upload_id}_{safe_name}", but we need to find it
+        # Better to modify complete to return the full path or store it
+
+        # For now, list files in UPLOAD_ROOT that start with upload_id
+        import glob
+        pattern = os.path.join(UPLOAD_ROOT, f"{upload_id}_*")
+        matches = glob.glob(pattern)
+        if not matches:
+            return jsonify({'error': 'file not found'}), 404
+        file_path = matches[0]  # assume one
+
+        # Now call send_file
+        res, code = call_handler('send_file', {'peer': peer, 'file_path': file_path})
+        return jsonify(res), code
 
     return app
 
