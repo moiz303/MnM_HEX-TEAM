@@ -297,35 +297,6 @@ class SecureMessenger:
         peer = self.discovery.get_peer_by_name(peer_name)
         if not peer:
             print(f"[main] ❌ Peer {peer_name} not found in discovery")
-            # Для web_user используем специальную обработку
-            if peer_name == 'web_user':
-                print(f"[main] 🌐 Using web_user fallback")
-                
-                # Проверяем есть ли активный чат с web_user
-                if peer_name not in self.active_chats:
-                    print(f"[main] 🤝 No active chat with {peer_name}, initiating handshake")
-                    try:
-                        # Принудительно инициируем handshake
-                        self.start_chat(peer_name)
-                        print(f"[main] ✅ Handshake initiated with {peer_name}")
-                    except Exception as e:
-                        print(f"[main] ❌ Handshake failed: {e}")
-                        raise ValueError(f"Could not establish secure session with {peer_name}")
-                else:
-                    print(f"[main] ✅ Active chat exists with {peer_name}")
-                
-                # Используем IP и device_id из handshake
-                ip = '192.168.0.231'  # Из логов handshake
-                device_id = '755c8d6420eadda1'  # Из логов handshake
-                
-                # Проверяем есть ли session key
-                session_key = self.crypto.get_session_key(device_id)
-                if not session_key:
-                    print(f"[main] ❌ No session key for web_user, cannot send file")
-                    raise ValueError(f"No secure session with {peer_name}")
-                
-                return self.router.send_file(ip, file_path, device_id)
-            
             raise ValueError(f"Peer {peer_name} not found")
         
         ip, info = peer
@@ -334,6 +305,13 @@ class SecureMessenger:
             raise ValueError(f"Device ID for {peer_name} not found")
         
         print(f"[main] ✅ Found peer {peer_name}: ip={ip}, device_id={device_id}")
+        
+        # Проверяем есть ли активный чат
+        if peer_name not in self.active_chats:
+            print(f"[main] 🤝 No active chat with {peer_name}, initiating handshake")
+            if not self.start_chat(peer_name):
+                raise ValueError(f"Could not establish secure session with {peer_name}")
+        
         return self.router.send_file(ip, file_path, device_id)
 
     def list_peers(self):
