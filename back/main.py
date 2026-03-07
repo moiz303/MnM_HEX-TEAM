@@ -53,6 +53,9 @@ class SecureMessenger:
         self.connection.start(self._on_message)
         self.connection.peer_id = self.device_id
 
+        # keep track of names user asked to handshake with (keyed by IP)
+        self.pending_chat_requests: Dict[str, str] = {}  # ip -> requested_peer_name
+
         print(f"🧅 Инициализация Onion Router...")
         self.router = OnionRouter(self.connection, self.crypto)
         self.router.file_manager.on_file_offer = self._on_incoming_file_offer
@@ -144,7 +147,13 @@ class SecureMessenger:
         success, chat_id, follow_up = self.handshake.handle_response(data)
         if success:
             peer_name = data['from']
+            # register chat under actual name
             self.active_chats[peer_name] = chat_id
+            # also register under requested name if different
+            req = self.pending_chat_requests.pop(addr[0], None)
+            if req and req != peer_name:
+                print(f"   ℹ️ Handshake requested as '{req}', actual name is '{peer_name}', linking both")
+                self.active_chats[req] = chat_id
             print(f"\n✅ Защищённый канал с {peer_name} установлен!")
             print(f"   Локальный chat_id: {chat_id[:8]}...")
             if follow_up:
@@ -293,22 +302,28 @@ class SecureMessenger:
         # Отправляем
         if self.connection.send_to_peer(ip, handshake_msg):
             print(f"   ✅ Handshake отправлен")
+            # record the requested name for this IP, in case the peer reports itself with another username
+            self.pending_chat_requests[ip] = peer_name
             # Ждем ответ, проверяя статус в цикле до таймаута
             deadline = time.time() + 5.0
             while time.time() < deadline:
                 if peer_name in self.active_chats:
                     print(f"   ✅ Чат с {peer_name} установлен")
+                    self.pending_chat_requests.pop(ip, None)
                     return True
                 time.sleep(0.2)
             # если вышли из цикла -- еще не установился
             if peer_name in self.active_chats:
                 print(f"   ✅ Чат с {peer_name} установлен")
+                self.pending_chat_requests.pop(ip, None)
                 return True
             else:
                 print(f"   ❌ Handshake с {peer_name} не завершён (таймаут)")
+                self.pending_chat_requests.pop(ip, None)
                 return False
         else:
             print(f"   ❌ {peer_name} не отвечает")
+            self.pending_chat_requests.pop(ip, None)
             return False
 
     def send_message(self, peer_name: str, text: str) -> bool:
