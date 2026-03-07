@@ -167,6 +167,7 @@ async function selectPeerByUsername(username) {
             // map messages to simple structure
             const mapped = (data.messages || []).map(m => ({
                 text: m.text || '',
+                from: m.from || activePeer.username,
                 time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
                 sent: m.from === 'me'
             }));
@@ -195,6 +196,7 @@ async function selectPeerByUsername(username) {
             const mapped = (data.messages || []).map(m => ({
                 id: m.msg_id || `${m.timestamp}_${Math.random()}`,
                 text: m.text || '',
+                from: m.from || activePeer.username,
                 time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
                 sent: m.from === 'me'
             }));
@@ -233,7 +235,7 @@ function renderMessages() {
         <div class="message ${msg.sent ? 'sent' : 'received'}">
             ${!msg.sent ? `
                 <div class="message-avatar">
-                    <span>${getInitials(activePeer.ip)}</span>
+                    <span>${msg.from === 'me' ? 'Я' : msg.from}</span>
                 </div>
             ` : ''}
             <div class="message-content">
@@ -278,13 +280,13 @@ function sendMessage() {
     // locally append
     if (text) {
         if (!messages[activePeer.username]) messages[activePeer.username] = [];
-        messages[activePeer.username].push({ text, time, sent: true });
+        messages[activePeer.username].push({ text, time, sent: true, from: 'me' });
     }
 
     if (selectedFiles.length > 0) {
         // append placeholders to message list
         selectedFiles.forEach(item => {
-            messages[activePeer.username].push({ text: `📎 ${item.file.name}`, time, sent: true });
+            messages[activePeer.username].push({ text: `📎 ${item.file.name}`, time, sent: true, from: 'me' });
         });
         // do not clear preview yet — we'll upload and then clear
     }
