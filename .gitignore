@@ -54,3 +54,31 @@ tmp/
 temp/
 
 node_modules/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.out
+*.pid
+
+# Socket files
+*.sock
+
+# Test outputs
+test_*.txt
+integration_test.txt
+
+# IDE and editor files
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

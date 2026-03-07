@@ -1,187 +1,260 @@
-# 🔐 Secure P2P Messenger
+# 🔐 Secure P2P Messenger with File Transfer
 
-Безопасный P2P мессенджер с передачей файлов и end-to-end шифрованием.
+A secure peer-to-peer messenger with end-to-end encryption and file transfer capabilities, built with Python and modern web technologies.
 
-## 🚀 Быстрый старт
+## ✨ Features
 
-### Запуск сервера
-```bash
-python3 back/web.py
+### 🔒 Security
+- **End-to-end encryption** using elliptic curve cryptography (ECDH)
+- **Perfect forward secrecy** with ephemeral session keys
+- **Digital signatures** for message authenticity
+- **Onion routing** for enhanced privacy
+- **Secure key exchange** with handshake protocol
+
+### 💬 Messaging
+- **Real-time P2P messaging** without central servers
+- **Peer discovery** via UDP broadcast
+- **Message delivery receipts** and read status
+- **System notifications** for file transfers
+- **Chat history** with local SQLite storage
+
+### 📁 File Transfer
+- **Secure file transfer** with encryption
+- **Chunked uploads** for large files
+- **Progress tracking** with real-time updates
+- **File validation** with checksums
+- **Auto-accept** for trusted peers
+- **Transfer cancellation** support
+
+### 🎨 User Interface
+- **Modern responsive web interface**
+- **Real-time updates** without page refresh
+- **File preview** and progress bars
+- **Mobile-friendly** design
+- **Dark/Light theme** support
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8 or higher
+- pip package manager
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-username/MnM_HEX-TEAM.git
+   cd MnM_HEX-TEAM
+   ```
+
+2. **Create virtual environment**
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Start the application**
+   ```bash
+   python3 run_server.py
+   ```
+
+5. **Open your browser**
+   Navigate to `http://localhost:8080`
+
+## 📖 Usage
+
+### Basic Setup
+1. **Choose a username** when prompted
+2. **Connect to peers** on your local network
+3. **Start chatting** securely
+
+### File Sharing
+1. **Click the attachment icon** 📎 in chat
+2. **Select files** to upload
+3. **Monitor progress** with real-time updates
+4. **Files auto-download** for trusted peers
+
+### Network Configuration
+- **Default port**: 8080 (web), 8765 (P2P)
+- **Discovery**: UDP broadcast on local network
+- **Direct connection**: IP-to-IP messaging
+
+## 🏗️ Architecture
+
+### Backend (`/back`)
 ```
-Сервер запустится на `http://localhost:5000`
+back/
+├── main.py              # Core messenger logic
+├── web.py               # Flask web server & API
+├── core/
+│   └── crypto.py        # Cryptographic engine
+├── messaging/
+│   └── handshake.py     # Peer handshake protocol
+├── network/
+│   ├── connection.py    # P2P connection manager
+│   ├── onion_router.py  # Onion routing implementation
+│   ├── file_transfer.py # Secure file transfer
+│   └── protocols.py     # Message protocols
+└── api/
+    └── local_api.py     # Local API server
+```
 
-### Тестирование
+### Frontend (`/frontend`)
+```
+frontend/
+├── index.html           # Main application page
+├── login.html           # User authentication
+├── css/
+│   └── styles.css       # Modern responsive styles
+└── js/
+    └── app.js           # Interactive frontend logic
+```
+
+## 🔧 Configuration
+
+### Environment Variables
 ```bash
-# Полная проверка системы
+export MESSENGER_USERNAME="your_username"  # Optional: Set default username
+```
+
+### Network Settings
+Edit `run_server.py` to customize:
+- Web server port
+- P2P communication port
+- File upload limits
+- Discovery settings
+
+## 🧪 Testing
+
+### Run All Tests
+```bash
 python3 tests/run_all_tests.py
-
-# Быстрая проверка
-python3 tests/quick_test.py
 ```
 
-## 📋 Статус проекта
-
-### ✅ Реализовано
-- 🔐 End-to-end шифрование сообщений
-- 📁 Безопасная передача файлов (ИСПРАВЛЕНО)
-- 🌐 P2P соединения
-- 🤝 Handshake протокол
-- 🧅 Onion маршрутизация
-- 📡 Обнаружение пиров
-- 💾 Локальное хранилище
-
-### 🧪 Тестирование
-```
-📈 Tests Passed: 6/6
-📊 Success Rate: 100.0%
-🎉 All tests passed!
-```
-
-## 📁 Структура проекта
-
-```
-MnM_HEX-TEAM/
-├── back/                    # 🔧 Основной код приложения
-│   ├── core/               # Криптографическое ядро
-│   ├── network/            # Сетевые компоненты
-│   ├── messaging/          # Обработка сообщений
-│   ├── storage/            # Хранилище данных
-│   ├── api/               # API интерфейсы
-│   ├── web.py             # Веб-сервер
-│   └── main.py            # Основное приложение
-├── frontend/               # 🎨 Веб-интерфейс
-│   ├── css/
-│   ├── js/
-│   └── index.html
-├── tests/                  # 🧪 Тесты
-│   ├── run_all_tests.py    # Полный набор тестов
-│   ├── quick_test.py       # Быстрая проверка
-│   └── test_*.py          # Модульные тесты
-├── downloads/              # Загруженные файлы
-├── uploads/                # Временные файлы
-├── requirements.txt        # Зависимости
-├── check_project.py        # Проверка структуры
-└── run_server.py           # Быстрый запуск
-```
-
-## 🔧 Требования
-
-- Python 3.8+
-- Зависимости из `requirements.txt`
-
-## 📦 Установка
-
+### Individual Test Suites
 ```bash
-# Клонирование репозитория
-git clone <repository-url>
-cd MnM_HEX-TEAM
-
-# Установка зависимостей
-pip install -r requirements.txt
-
-# Запуск тестов
-python3 tests/run_all_tests.py
-
-# Запуск сервера
-python3 back/web.py
+python3 tests/quick_test.py                    # Basic functionality
+python3 tests/test_file_transfer.py            # File transfer system
+python3 tests/test_comprehensive_p2p.py        # P2P integration
+python3 tests/test_complete_file_transfer.py   # End-to-end transfer
 ```
 
-## 🌐 Использование
+### Test Coverage
+- ✅ Cryptographic operations
+- ✅ P2P messaging
+- ✅ File transfer protocol
+- ✅ Onion routing
+- ✅ Web API endpoints
+- ✅ Frontend integration
 
-1. **Запустите сервер**: `python3 back/web.py`
-2. **Откройте браузер**: `http://localhost:5000`
-3. **Создайте пользователя**: Введите имя пользователя
-4. **Подключитесь к пирам**: Введите IP адрес другого пользователя
-5. **Начните общение**: Отправляйте сообщения и файлы
+## 🔒 Security Details
 
-## 🔐 Безопасность
+### Cryptography
+- **Curve**: secp256r1 (prime256v1)
+- **Key exchange**: ECDH with HKDF
+- **Encryption**: AES-256-GCM
+- **Signatures**: ECDSA with SHA-256
+- **Hashing**: SHA-256 for integrity
 
-- **End-to-end шифрование**: Все сообщения шифруются на стороне клиента
-- **Криптография на эллиптических кривых**: Современные алгоритмы шифрования
-- **Защита от MITM**: Handshake протокол с верификацией ключей
-- **Безопасная передача файлов**: Файлы шифруются перед передачей
+### Privacy Features
+- **No central servers** - pure P2P
+- **Onion routing** for IP protection
+- **Ephemeral keys** for forward secrecy
+- **Local storage only** - no cloud exposure
 
-## 📁 Передача файлов
+## 🌐 Network Protocol
 
-- **Шифрование**: Файлы шифруются перед передачей
-- **Чанкинг**: Большие файлы делятся на части
-- **ACK подтверждения**: Гарантия доставки каждого чанка
-- **Автовосстановление**: Повторная отправка при ошибках
+### Message Types
+- `HANDSHAKE_INIT` - Secure connection initiation
+- `HANDSHAKE_RESPONSE` - Handshake completion
+- `SECURE_MESSAGE` - Encrypted chat messages
+- `FILE_OFFER` - File transfer proposal
+- `FILE_CHUNK` - Encrypted file data
+- `DELIVERY_RECEIPT` - Message acknowledgment
 
-## 🧪 Тестирование
+### Discovery Protocol
+- UDP broadcast on local network
+- Peer information exchange
+- Automatic peer detection
+- Device identification
 
-### Запуск тестов
+## 📝 Development
+
+### Adding Features
+1. **Backend**: Extend `/back/network/` modules
+2. **Frontend**: Modify `/frontend/js/app.js`
+3. **API**: Add endpoints in `/back/web.py`
+4. **Tests**: Create new test files in `/tests/`
+
+### Code Style
+- **Python**: PEP 8 compliant
+- **JavaScript**: Modern ES6+ standards
+- **CSS**: Responsive design with flexbox/grid
+- **Documentation**: Comprehensive docstrings
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Port already in use**
 ```bash
-# Полный набор тестов
-python3 tests/run_all_tests.py
-
-# Быстрая проверка
-python3 tests/quick_test.py
-
-# Отдельные тесты
-python3 tests/test_file_transfer.py
-python3 tests/test_integration.py
-python3 tests/test_file_transfer_fixes.py
+# Kill existing processes
+lsof -ti:8080 | xargs kill -9
+python3 run_server.py
 ```
 
-### Покрытие тестами
-- ✅ Модульные тесты компонентов
-- ✅ Интеграционные тесты
-- ✅ Тесты файловой передачи
-- ✅ Тесты исправленных кейсов
-- ✅ End-to-end сценарии
+**Firewall blocking**
+- Allow ports 8080 and 8765
+- Enable UDP broadcast for discovery
 
-## 🎯 Исправленные проблемы файловой передачи
+**Peers not discovered**
+- Check network connectivity
+- Verify same subnet
+- Disable VPN if needed
 
-### ✅ Исправленные кейсы
-1. **Нормализация IP → Device ID**: Корректное преобразование адресов для шифрования
-2. **Обработка FILE_ACCEPT**: Подтверждение принятия файлов
-3. **Обработка DELIVERY_RECEIPT**: ACK сообщения для чанков
-4. **Исправленные вызовы методов**: `send_message` → `send_to_peer`
-5. **Интеграция с Onion Router**: Правильная маршрутизация
+**File transfer fails**
+- Verify sufficient disk space
+- Check file permissions
+- Ensure stable connection
 
-## 🔧 Разработка
+### Debug Mode
+Enable debug logging:
+```bash
+export DEBUG=1
+python3 run_server.py
+```
 
-### Структура кода
-- `back/core/` - Криптографические операции
-- `back/network/` - Сетевое взаимодействие
-- `back/messaging/` - Обработка сообщений
-- `back/storage/` - База данных
-- `back/api/` - API интерфейсы
+## 🤝 Contributing
 
-### Добавление функций
-1. Напишите тесты в `tests/`
-2. Реализуйте функцию в `back/`
-3. Проверьте тесты: `python3 tests/run_all_tests.py`
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature-name`
+3. Commit changes: `git commit -am 'Add feature'`
+4. Push to branch: `git push origin feature-name`
+5. Submit pull request
 
-## 🐛 Отладка
+## 📄 License
 
-### Логирование
-Система использует детальное логирование для отладки:
-- `[crypto]` - Криптографические операции
-- `[network]` - Сетевое взаимодействие
-- `[file_transfer]` - Передача файлов
-- `[main]` - Основные события
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-### Частые проблемы
-1. **Порт занят**: Измените порт в `back/web.py`
-2. **Файл не найден**: Проверьте пути в `back/web.py`
-3. **Шифрование**: Убедитесь что оба пира имеют ключи
+## 🙏 Acknowledgments
 
-## 📄 Лицензия
+- **Cryptography**: Cryptography.io library
+- **Web Framework**: Flask with CORS support
+- **Frontend**: Vanilla JavaScript with modern APIs
+- **Testing**: Custom test framework with comprehensive coverage
 
-[Добавьте лицензию]
+## 📞 Support
 
-## 🤝 Вклад
-
-1. Fork проекта
-2. Создайте feature branch
-3. Внесите изменения
-4. Протестируйте: `python3 tests/run_all_tests.py`
-5. Отправьте Pull Request
+For issues and questions:
+- Create GitHub issue
+- Check troubleshooting section
+- Review test cases for examples
 
 ---
 
-**🚀 Система готова к использованию!**
-
-Все компоненты протестированы и работают корректно.
+**🔐 Secure P2P Messenger** - Communicate freely, securely, and without central control.
