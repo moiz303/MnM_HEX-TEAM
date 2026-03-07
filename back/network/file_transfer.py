@@ -841,24 +841,24 @@ class FileTransferManager:
             '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             '.xls': 'application/vnd.ms-excel',
             '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            '.ppt': 'application/vnd.ms-powerpoint',
-            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         }
-        return mime_map.get(ext, 'application/octet-stream')
         
-    def _validate_file_path(self, file_path: str) -> bool:
-        """Валидация пути к файлу"""
-        try:
-            path = Path(file_path)
-            # Проверка на path traversal
-            if '..' in path.parts or str(path).startswith('/'):
-                return False
-            # Проверка размера
-            if path.stat().st_size > Limits.MAX_FILE_SIZE:
-                return False
-            return True
-        except Exception:
-            return False
+        return mime_map.get(ext, 'application/octet-stream')
+
+    def _find_device_id_by_session_lookup(self, ip: str) -> Optional[str]:
+        """Fallback method: try to find device_id by checking existing sessions"""
+        # This is a fallback when discovery doesn't have the peer
+        # We'll try to find sessions that might be associated with this IP
+        if hasattr(self, 'router') and self.router:
+            # Try to get from router's discovery
+            discovery = getattr(self.router, 'discovery', None)
+            if discovery:
+                info = discovery.get_all_peers().get(ip)
+                if info:
+                    device_id = info.get('device_id')
+                    if device_id:
+                        return device_id
+        return None
 
     def _encrypt_metadata(self, metadata: dict) -> str:
         import json
@@ -1021,3 +1021,31 @@ class FileTransferManager:
                 if session.status == 'in_progress':
                     session.status = 'failed'
                     session.error_message = "Shutdown"
+
+    def _validate_file_path(self, file_path: str) -> bool:
+        """Валидация пути к файлу"""
+        try:
+            path = Path(file_path)
+            
+            # Проверка на path traversal
+            if '..' in path.parts:
+                return False
+            
+            # Разрешаем абсолютные пути если они в разрешенных директориях
+            if str(path).startswith('/'):
+                # Проверяем что путь в разрешенной директории (downloads/uploads)
+                allowed_dirs = ['/downloads/', '/uploads/', './downloads/', './uploads/']
+                if not any(str(path).startswith(allowed_dir) for allowed_dir in allowed_dirs):
+                    return False
+            elif str(path).startswith('./'):
+                # Относительные пути должны начинаться с downloads/ или uploads/
+                if not (str(path).startswith('./downloads/') or str(path).startswith('./uploads/')):
+                    return False
+            
+            # Проверка размера
+            if path.stat().st_size > Limits.MAX_FILE_SIZE:
+                return False
+            
+            return True
+        except Exception:
+            return False
