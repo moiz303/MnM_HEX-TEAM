@@ -424,6 +424,10 @@ class SecureCryptoCore:
 
     def encrypt_with_key(self, data: bytes, key: bytes) -> bytes:
         """Зашифровать данные с заданным ключом (для файлов)"""
+        import hashlib
+        data_hash = hashlib.sha256(data).hexdigest()
+        print(f"[crypto] encrypt_with_key: input size {len(data)}, hash {data_hash[:8]}...")
+        
         iv = secrets.token_bytes(16)
         cipher = Cipher(
             algorithms.AES(key),
@@ -436,8 +440,10 @@ class SecureCryptoCore:
         padded = padder.update(data) + padder.finalize()
         ciphertext = encryptor.update(padded) + encryptor.finalize()
 
+        result = iv + ciphertext
+        print(f"[crypto] encrypt_with_key: output size {len(result)} (iv 16 + cipher {len(ciphertext)})")
         # Возвращаем iv + ciphertext
-        return iv + ciphertext
+        return result
 
     def decrypt_with_key(self, data: bytes, key: bytes) -> bytes:
         """Расшифровать данные с заданным ключом (для файлов)"""
@@ -446,6 +452,8 @@ class SecureCryptoCore:
 
         iv = data[:16]
         ciphertext = data[16:]
+
+        print(f"[crypto] decrypt_with_key: input size {len(data)}, iv {len(iv)}, cipher {len(ciphertext)}")
 
         cipher = Cipher(
             algorithms.AES(key),
@@ -456,7 +464,12 @@ class SecureCryptoCore:
         padded = decryptor.update(ciphertext) + decryptor.finalize()
 
         unpadder = padding.PKCS7(128).unpadder()
-        return unpadder.update(padded) + unpadder.finalize()
+        result = unpadder.update(padded) + unpadder.finalize()
+        
+        import hashlib
+        result_hash = hashlib.sha256(result).hexdigest()
+        print(f"[crypto] decrypt_with_key: output size {len(result)}, hash {result_hash[:8]}...")
+        return result
 
     def get_session_key(self, peer_id: str) -> Optional[bytes]:
         """Получить ключ сессии для peer_id (для файлов)"""

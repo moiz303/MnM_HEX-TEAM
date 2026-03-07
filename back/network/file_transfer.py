@@ -172,7 +172,8 @@ class FileTransferManager:
                     chunk_hash=chunk_hash,
                     chunk_size=len(data)
                 )
-                print(f"[file_transfer] created chunk {i}, size {len(data)}, hash {chunk_hash[:8]}...")
+                data_first_50 = data[:50].hex()
+                print(f"[file_transfer] chunk {i}: size={len(data)}, hash={chunk_hash[:8]}..., first50={data_first_50}")
 
     def _send_chunks_loop(self, session: TransferSession):
         """Цикл отправки чанков с flow control"""
@@ -207,10 +208,10 @@ class FileTransferManager:
         if session_key:
             encrypted_data = self.crypto.encrypt_with_key(chunk.data, session_key)
             data_hex = base64.b64encode(encrypted_data).decode()
-            print(f"[file_transfer] sending chunk {chunk.chunk_index}, original size {len(chunk.data)}, encrypted size {len(encrypted_data)}, encoded size {len(data_hex)}")
+            print(f"[file_transfer] SEND chunk {chunk.chunk_index}: orig={len(chunk.data)}, encr={len(encrypted_data)}, b64_len={len(data_hex)}, hash={chunk.chunk_hash[:8]}...")
         else:
             data_hex = base64.b64encode(chunk.data).decode()
-            print(f"[file_transfer] sending chunk {chunk.chunk_index}, size {len(chunk.data)}, encoded size {len(data_hex)}, using base64")
+            print(f"[file_transfer] SEND chunk {chunk.chunk_index}: size={len(chunk.data)}, b64_len={len(data_hex)}, hash={chunk.chunk_hash[:8]}..., no_encrypt")
 
         msg = create_message(
             MessageType.FILE_CHUNK,
@@ -348,13 +349,17 @@ class FileTransferManager:
             try:
                 import base64
                 session_key = self.crypto.get_session_key(sender_id)
+                
+                # Decode from base64
+                print(f"[file_transfer] RECV chunk {chunk_index}: encrypted_b64_len={len(chunk_data_hex)}")
+                encrypted_bytes = base64.b64decode(chunk_data_hex)
+                print(f"[file_transfer] RECV chunk {chunk_index}: encrypted_bytes_len={len(encrypted_bytes)}")
+                
                 if session_key:
-                    encrypted_bytes = base64.b64decode(chunk_data_hex)
                     decrypted_data = self.crypto.decrypt_with_key(encrypted_bytes, session_key)
-                    print(f"[file_transfer] received chunk {chunk_index}, encrypted size {len(encrypted_bytes)}, decrypted size {len(decrypted_data)}")
                 else:
-                    decrypted_data = base64.b64decode(chunk_data_hex)
-                    print(f"[file_transfer] received chunk {chunk_index}, base64 encoded size {len(chunk_data_hex)}, decoded size {len(decrypted_data)}")
+                    decrypted_data = encrypted_bytes
+                    print(f"[file_transfer] RECV chunk {chunk_index}: no session key, using raw data")
             except Exception as e:
                 print(f"[file_transfer] Decryption/decoding error for chunk {chunk_index}: {e}")
                 import traceback
@@ -363,13 +368,10 @@ class FileTransferManager:
 
             actual_hash = hashlib.sha256(decrypted_data).hexdigest()
             expected_hash = chunk_hash
-            print(f"[file_transfer] chunk {chunk_index} hash check: expected={expected_hash[:8]}..., got={actual_hash[:8]}...")
+            data_first_50 = decrypted_data[:50].hex()
+            print(f"[file_transfer] RCV_HASH chunk {chunk_index}: exp={expected_hash[:8]}..., got={actual_hash[:8]}..., size={len(decrypted_data)}, first50={data_first_50}")
             if actual_hash != expected_hash:
-                print(f"[file_transfer] ❌ Chunk hash mismatch: {chunk_index}")
-                print(f"               Expected: {expected_hash}")
-                print(f"               Got:      {actual_hash}")
-                print(f"               Data size: {len(decrypted_data)}")
-                print(f"               First 100 bytes (hex): {decrypted_data[:100].hex()}")
+                print(f"[file_transfer] ❌ Hash mismatch chunk {chunk_index}: expected {expected_hash} got {actual_hash}")
                 return
 
             self._write_chunk(session.local_path, chunk_index, decrypted_data)
