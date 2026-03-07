@@ -186,8 +186,33 @@ def create_app():
                     chat_id = messenger.active_chats.get(peer)
                     if not chat_id:
                         return {'messages': [], 'total': 0, 'count': 0}, 200
-                    msgs = messenger.get_conversation(chat_id, limit)
-                    return {'messages': msgs, 'total': len(msgs), 'count': len(msgs)}, 200
+                    msgs_raw = messenger.get_conversation(chat_id, limit)
+                    # Обрабатываем сообщения как в api.py
+                    result = []
+                    for msg in msgs_raw:
+                        sender, encrypted, timestamp, delivered = msg
+                        text = "[encrypted]"
+                        try:
+                            # если в БД хранится читаемый текст — вернём его
+                            if isinstance(encrypted, (bytes, bytearray)):
+                                try:
+                                    decoded = encrypted.decode('utf-8')
+                                    text = decoded
+                                except Exception:
+                                    text = "[encrypted]"
+                            elif isinstance(encrypted, str):
+                                text = encrypted
+                        except Exception:
+                            text = "[encrypted]"
+
+                        result.append({
+                            'msg_id': f"msg_{timestamp}",
+                            'from': 'me' if sender == messenger.username else sender,
+                            'text': text,
+                            'timestamp': timestamp,
+                            'status': 'delivered' if delivered else 'sent'
+                        })
+                    return {'messages': result, 'total': len(result), 'count': len(result)}, 200
 
                 if name == 'get_my_info':
                     return messenger.get_my_info() if hasattr(messenger, 'get_my_info') else {'username': messenger.username}, 200
