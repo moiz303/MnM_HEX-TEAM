@@ -66,7 +66,11 @@ def create_app():
 
     if not remote_client:
         try:
-            messenger = SecureMessenger('web_user')
+            # Generate unique username for web instance
+            import uuid
+            web_user_id = str(uuid.uuid4())[:8]
+            username = f'web_user_{web_user_id}'
+            messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
             print('[web] Started in-process SecureMessenger')
@@ -190,8 +194,10 @@ def create_app():
                     
                     if only_incoming:
                         msgs_raw = messenger.get_incoming_messages(chat_id, limit)
+                        print(f"🔍 DEBUG: Получено {len(msgs_raw)} входящих сообщений для chat_id={chat_id}")
                     else:
                         msgs_raw = messenger.get_conversation(chat_id, limit)
+                        print(f"🔍 DEBUG: Получено {len(msgs_raw)} всех сообщений для chat_id={chat_id}")
                     
                     # Обрабатываем сообщения как в api.py
                     result = []
@@ -218,6 +224,7 @@ def create_app():
                             'timestamp': timestamp,
                             'status': 'delivered' if delivered else 'sent'
                         })
+                        print(f"🔍 DEBUG: Обработано сообщение от={sender}, text={text[:20]}, from_field={'me' if sender == messenger.username else sender}")
                     return {'messages': result, 'total': len(result), 'count': len(result)}, 200
 
                 if name == 'get_my_info':
