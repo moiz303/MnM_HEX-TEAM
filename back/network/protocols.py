@@ -81,10 +81,10 @@ class MessageType(str, Enum):
 
 class Limits:
     """Ограничения на размеры данных"""
-    MAX_MESSAGE_SIZE = 100 * 1024  # 100KB (was 64KB) - accommodate base64 encoded ~32KB chunks
-    MAX_ENCRYPTED_SIZE = 104 * 1024  # 104KB
+    MAX_MESSAGE_SIZE = 200 * 1024  # 200KB (increased for base64 encoded chunks)
+    MAX_ENCRYPTED_SIZE = 204 * 1024  # 204KB
     MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-    MAX_FILE_CHUNK = 32 * 1024  # 32KB
+    MAX_FILE_CHUNK = 16 * 1024  # 16KB (reduced to fit in message limits)
     MAX_FILENAME_LENGTH = 255
     MAX_HOPS = 5
     MAX_PEERS_IN_BUCKET = 20
