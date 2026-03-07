@@ -185,7 +185,7 @@ class SecureMessenger:
             # Добавляем в активные чаты если еще нет
             if peer_name and peer_name not in self.active_chats:
                 # Ищем chat_id из маппинга
-                for local_id, remote_id in self.crypto.chat_mappings.items():
+                for local_id, remote_id in self.crypto._local_to_remote.items():
                     if remote_id == data.get('chat_id'):
                         self.active_chats[peer_name] = local_id
                         print(f"   ✅ Чат с {peer_name} активирован после HANDSHAKE_COMPLETE")
