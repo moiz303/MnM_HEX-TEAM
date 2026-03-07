@@ -421,3 +421,46 @@ class SecureCryptoCore:
         # `remote_chat_id`, корректно разрешались в сессию.
         self._remote_to_local[local_chat_id] = local_chat_id
         print(f"  📍 Registered mapping: {local_chat_id[:8]} <-> {remote_chat_id[:8]} (and identity for local)")
+
+    def encrypt_with_key(self, data: bytes, key: bytes) -> bytes:
+        """Зашифровать данные с заданным ключом (для файлов)"""
+        iv = secrets.token_bytes(16)
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+
+        padder = padding.PKCS7(128).padder()
+        padded = padder.update(data) + padder.finalize()
+        ciphertext = encryptor.update(padded) + encryptor.finalize()
+
+        # Возвращаем iv + ciphertext
+        return iv + ciphertext
+
+    def decrypt_with_key(self, data: bytes, key: bytes) -> bytes:
+        """Расшифровать данные с заданным ключом (для файлов)"""
+        if len(data) < 16:
+            raise CryptoError("Data too short for IV")
+
+        iv = data[:16]
+        ciphertext = data[16:]
+
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        padded = decryptor.update(ciphertext) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(128).unpadder()
+        return unpadder.update(padded) + unpadder.finalize()
+
+    def get_session_key(self, peer_id: str) -> Optional[bytes]:
+        """Получить ключ сессии для peer_id (для файлов)"""
+        for session in self._session_keys.values():
+            if session.peer_id == peer_id:
+                return session.encrypt_key.read()
+        return None
