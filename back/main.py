@@ -205,25 +205,46 @@ class SecureMessenger:
             return
         try:
             decrypted = self.crypto.decrypt_message(encrypted, sender)
-            print(f"\n💬 [{sender}]: {decrypted['content']}")
-            msg_id = hashlib.sha256(f"{sender}{decrypted['timestamp']}{decrypted['content']}".encode()).hexdigest()[:16]
-            local_chat_id = None
-            if sender in self.active_chats:
-                local_chat_id = self.active_chats[sender]
-            else:
-                try:
-                    remote_id = encrypted.get('remote_chat_id') or encrypted.get('chat_id')
-                    res = self.crypto.get_session_for_message(remote_id, is_remote=True) if remote_id else None
-                    if res:
-                        local_chat_id = res[0]
-                except Exception:
-                    local_chat_id = None
-            try:
-                self.db.add_message(msg_id, local_chat_id or 'unknown', sender, decrypted['content'].encode(), 'in')
-            except Exception as e:
-                print(f"   ❌ Не удалось сохранить сообщение в БД: {e}")
         except CryptoError as e:
-            print(f"\n❌ Ошибка расшифровки: {e}")
+            msg = str(e)
+            # попытка восстановления маппинга если у нас уже есть чат с отправителем
+            if "No session for remote chat" in msg and sender in self.active_chats:
+                remote_id = encrypted.get('remote_chat_id') or encrypted.get('chat_id')
+                local_id = self.active_chats[sender]
+                if remote_id:
+                    print(f"[main] 🔄 Восстанавливаем маппинг {remote_id[:8]} -> {local_id[:8]}")
+                    self.crypto.register_chat_mapping(local_id, remote_id)
+                    try:
+                        decrypted = self.crypto.decrypt_message(encrypted, sender)
+                        print(f"[main] ✅ Расшифровка после восстановления маппинга успешна")
+                    except CryptoError as e2:
+                        print(f"\n❌ Ошибка расшифровки после маппинга: {e2}")
+                        return
+                else:
+                    print(f"\n❌ Ошибка расшифровки: {e}")
+                    return
+            else:
+                print(f"\n❌ Ошибка расшифровки: {e}")
+                return
+
+        # если мы попали сюда, decrypted определён
+        print(f"\n💬 [{sender}]: {decrypted['content']}")
+        msg_id = hashlib.sha256(f"{sender}{decrypted['timestamp']}{decrypted['content']}".encode()).hexdigest()[:16]
+        local_chat_id = None
+        if sender in self.active_chats:
+            local_chat_id = self.active_chats[sender]
+        else:
+            try:
+                remote_id = encrypted.get('remote_chat_id') or encrypted.get('chat_id')
+                res = self.crypto.get_session_for_message(remote_id, is_remote=True) if remote_id else None
+                if res:
+                    local_chat_id = res[0]
+            except Exception:
+                local_chat_id = None
+        try:
+            self.db.add_message(msg_id, local_chat_id or 'unknown', sender, decrypted['content'].encode(), 'in')
+        except Exception as e:
+            print(f"   ❌ Не удалось сохранить сообщение в БД: {e}")
 
     def _on_incoming_file_offer(self, session):
         sender_id = session.file_info.sender_id
@@ -272,14 +293,19 @@ class SecureMessenger:
         # Отправляем
         if self.connection.send_to_peer(ip, handshake_msg):
             print(f"   ✅ Handshake отправлен")
-            # Ждем ответа 1 секунду
-            time.sleep(1.0)
-            # Проверяем установился ли чат
+            # Ждем ответ, проверяя статус в цикле до таймаута
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                if peer_name in self.active_chats:
+                    print(f"   ✅ Чат с {peer_name} установлен")
+                    return True
+                time.sleep(0.2)
+            # если вышли из цикла -- еще не установился
             if peer_name in self.active_chats:
                 print(f"   ✅ Чат с {peer_name} установлен")
                 return True
             else:
-                print(f"   ⏳ Ожидаем ответа от {peer_name}...")
+                print(f"   ❌ Handshake с {peer_name} не завершён (таймаут)")
                 return False
         else:
             print(f"   ❌ {peer_name} не отвечает")
