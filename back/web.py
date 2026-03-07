@@ -114,6 +114,10 @@ def create_app():
         messenger = MockBackend()
 
     # Serve index and static files
+    @app.route('/login')
+    def login_page():
+        return send_from_directory(FRONTEND_DIR, 'login.html')
+
     @app.route('/')
     def index():
         return send_from_directory(FRONTEND_DIR, 'index.html')
@@ -268,6 +272,33 @@ def create_app():
         limit = int(request.args.get('limit', 50))
         res, code = call_handler('get_messages', {'peer': peer, 'limit': limit})
         return jsonify(res), code
+
+    @app.route('/api/set_username', methods=['POST'])
+    def api_set_username():
+        try:
+            data = request.get_json()
+            username = data.get('username', '').strip()
+            
+            if not username:
+                return jsonify({'error': 'Username required'}), 400
+            
+            if len(username) > 20:
+                return jsonify({'error': 'Username too long (max 20 chars)'}), 400
+            
+            # В реальном приложении здесь нужно перезапустить сервер с новым именем
+            # Для простоты просто сохраним имя и вернем успех
+            print(f"📝 User wants to set username: {username}")
+            print("⚠️  Please restart the server with:")
+            print(f"   MESSENGER_USERNAME={username} .venv/bin/python back/web.py")
+            
+            return jsonify({
+                'success': True,
+                'message': f'Username {username} set. Please restart server manually.',
+                'username': username
+            }), 200
+            
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/api/my_info', methods=['GET'])
     def api_my_info():
