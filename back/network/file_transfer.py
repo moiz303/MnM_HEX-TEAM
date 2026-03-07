@@ -172,6 +172,7 @@ class FileTransferManager:
                     chunk_hash=chunk_hash,
                     chunk_size=len(data)
                 )
+                print(f"[file_transfer] created chunk {i}, size {len(data)}")
 
     def _send_chunks_loop(self, session: TransferSession):
         """Цикл отправки чанков с flow control"""
@@ -205,9 +206,11 @@ class FileTransferManager:
         if session_key:
             encrypted_data = self.crypto.encrypt_with_key(chunk.data, session_key)
             data_hex = encrypted_data.hex()
+            print(f"[file_transfer] sending chunk {chunk.chunk_index}, original size {len(chunk.data)}, encrypted size {len(encrypted_data)}")
         else:
             import base64
             data_hex = base64.b64encode(chunk.data).decode()
+            print(f"[file_transfer] sending chunk {chunk.chunk_index}, size {len(chunk.data)}, using base64")
 
         msg = create_message(
             MessageType.FILE_CHUNK,
@@ -331,9 +334,11 @@ class FileTransferManager:
                 if session_key:
                     encrypted_bytes = bytes.fromhex(chunk_data_hex)
                     decrypted_data = self.crypto.decrypt_with_key(encrypted_bytes, session_key)
+                    print(f"[file_transfer] received chunk {chunk_index}, encrypted size {len(encrypted_bytes)}, decrypted size {len(decrypted_data)}")
                 else:
                     import base64
                     decrypted_data = base64.b64decode(chunk_data_hex)
+                    print(f"[file_transfer] received chunk {chunk_index}, base64 size {len(chunk_data_hex)}, decoded size {len(decrypted_data)}")
             except Exception as e:
                 print(f"Decryption error: {e}")
                 return
@@ -395,6 +400,8 @@ class FileTransferManager:
                     session.error_message = "File hash verification failed"
                     self.stats['transfers_completed'] -= 1
                     self.stats['transfers_failed'] += 1
+                else:
+                    print(f"[file_transfer] download completed, file {session.local_path} size {os.path.getsize(session.local_path) if os.path.exists(session.local_path) else 0}")
 
             if session.direction == 'upload':
                 msg = create_message(

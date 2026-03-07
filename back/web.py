@@ -441,6 +441,8 @@ def create_app():
         else:
             print(f"[web] found file_path {file_path} via map")
 
+        print(f"[web] file {file_path} exists: {os.path.exists(file_path)}, size: {os.path.getsize(file_path) if os.path.exists(file_path) else 0}")
+
         # Now call send_file
         print(f"[web] calling send_file peer={peer} path={file_path}")
         res, code = call_handler('send_file', {'peer': peer, 'file_path': file_path})
