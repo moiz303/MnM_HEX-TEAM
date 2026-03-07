@@ -1,0 +1,71 @@
+services:
+  # Узел Alice
+  alice:
+    build: .
+    container_name: mesh-alice
+    ports:
+      - "8080:8080"
+    environment:
+      - MESSENGER_USERNAME=Alice
+      - PYTHONPATH=/app
+    volumes:
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+
+  # Узел Bob  
+  bob:
+    build: .
+    container_name: mesh-bob
+    ports:
+      - "8081:8080"
+    environment:
+      - MESSENGER_USERNAME=Bob
+      - PYTHONPATH=/app
+    volumes:
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+
+  # Узел Charlie
+  charlie:
+    build: .
+    container_name: mesh-charlie
+    ports:
+      - "8082:8080"
+    environment:
+      - MESSENGER_USERNAME=Charlie
+      - PYTHONPATH=/app
+    volumes:
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+
+  # Узел Diana (дополнительный)
+  diana:
+    build: .
+    container_name: mesh-diana
+    ports:
+      - "8083:8080"
+    environment:
+      - MESSENGER_USERNAME=Diana
+      - PYTHONPATH=/app
+    volumes:
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+
+networks:
+  mesh-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -61,6 +61,29 @@
                 </button>
             </div>
         </main>
+        
+        <!-- Mesh Network Visualization Panel -->
+        <div class="mesh-panel" id="mesh-panel">
+            <div class="mesh-header">
+                <h3>Сеть Mesh</h3>
+                <button id="toggle-mesh" class="btn btn--sm btn--secondary">Скрыть</button>
+            </div>
+            <div id="mesh-visualization" class="mesh-visualization"></div>
+            <div class="mesh-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Узлов:</span>
+                    <span id="node-count" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Соединений:</span>
+                    <span id="edge-count" class="stat-value">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Онлайн:</span>
+                    <span id="online-count" class="stat-value">0</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="notification-container" class="notification-container"></div>

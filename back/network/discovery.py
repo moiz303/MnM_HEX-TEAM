@@ -96,14 +96,26 @@ class PeerDiscovery:
                     'device_id': self.device_id,
                     'public_key': self.public_key_b64,
                     'port': MESSAGE_PORT,
-                    'timestamp': time.time()
+                    'timestamp': time.time(),
+                    'version': '1.0',
+                    'capabilities': ['chat', 'files', 'handshake']
                 }
-                self.broadcast_socket.sendto(
-                    json.dumps(presence).encode(),
-                    ('<broadcast>', BROADCAST_PORT)
-                )
+                
+                message = json.dumps(presence).encode()
+                
+                # Отправляем несколько раз для надежности
+                for _ in range(3):
+                    try:
+                        self.broadcast_socket.sendto(message, ('<broadcast>', BROADCAST_PORT))
+                        time.sleep(0.05)  # Уменьшенная задержка
+                    except Exception as e:
+                        print(f"[discovery] Broadcast send error: {e}")
+                        break
+                
             except Exception as e:
-                print(f"Broadcast error: {e}")
+                print(f"[discovery] Broadcast loop error: {e}")
+            
+            # Уменьшенный интервал для более быстрого обнаружения
             time.sleep(Intervals.PRESENCE_BROADCAST)
 
     def _listen_loop(self):

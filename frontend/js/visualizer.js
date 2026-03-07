@@ -347,7 +347,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Инициализация только если на странице визуализатора
     if (document.getElementById('network-canvas')) {
         visualizer = new MeshVisualizer();
-        visualizer.addLog('Mesh Network Visualizer готов к работе', 'success');
+        
+        // Проверяем наличие API перед запуском
+        fetch('/api/mesh/stats')
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    visualizer.addLog('Визуализатор недоступен - messenger не инициализирован', 'error');
+                    visualizer.addLog('Пожалуйста, войдите в систему', 'warning');
+                } else {
+                    visualizer.addLog('Mesh Network Visualizer готов к работе', 'success');
+                    visualizer.startPolling();
+                }
+            })
+            .catch(error => {
+                visualizer.addLog('Ошибка подключения к API', 'error');
+            });
     }
 });
 

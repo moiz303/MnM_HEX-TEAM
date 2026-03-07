@@ -1,0 +1,153 @@
+version: '3.8'
+
+services:
+  # Узел Alice с полным функционалом
+  alice:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: mesh-alice-advanced
+    ports:
+      - "8080:8080"      # Web интерфейс
+      - "37021:37021/udp" # P2P discovery
+    environment:
+      - MESSENGER_USERNAME=Alice
+      - PYTHONPATH=/app
+      - FLASK_ENV=production
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs/alice:/app/logs
+      - ./downloads/alice:/app/downloads
+      - ./uploads:/app/uploads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/current_username"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Узел Bob с полным функционалом
+  bob:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: mesh-bob-advanced
+    ports:
+      - "8081:8080"      # Web интерфейс
+      - "37022:37021/udp" # P2P discovery (разный порт для хоста)
+    environment:
+      - MESSENGER_USERNAME=Bob
+      - PYTHONPATH=/app
+      - FLASK_ENV=production
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs/bob:/app/logs
+      - ./downloads/bob:/app/downloads
+      - ./uploads:/app/uploads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+    depends_on:
+      - alice
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/current_username"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Узел Charlie с полным функционалом
+  charlie:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: mesh-charlie-advanced
+    ports:
+      - "8082:8080"      # Web интерфейс
+      - "37023:37021/udp" # P2P discovery (разный порт для хоста)
+    environment:
+      - MESSENGER_USERNAME=Charlie
+      - PYTHONPATH=/app
+      - FLASK_ENV=production
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs/charlie:/app/logs
+      - ./downloads/charlie:/app/downloads
+      - ./uploads:/app/uploads
+    networks:
+      - mesh-network
+    restart: unless-stopped
+    depends_on:
+      - alice
+      - bob
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/current_username"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Monitoring сервис для отслеживания сети
+  monitor:
+    image: alpine:latest
+    container_name: mesh-monitor
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs:/app/logs
+    command: >
+      sh -c "
+        apk add --no-cache curl jq &&
+        while true; do
+          echo '=== Mesh Network Status ===' >> /app/logs/monitor.log
+          date >> /app/logs/monitor.log
+          
+          for container in mesh-alice-advanced mesh-bob-advanced mesh-charlie-advanced; do
+            if docker inspect \$container > /dev/null 2>&1; then
+              status=\$(docker inspect \$container --format='{{.State.Status}}')
+              health=\$(docker inspect \$container --format='{{.State.Health.Status}}' 2>/dev/null || echo 'none')
+              echo \"\$container: \$status (\$health)\" >> /app/logs/monitor.log
+            fi
+          done
+          
+          echo '' >> /app/logs/monitor.log
+          sleep 30
+        done
+      "
+    networks:
+      - mesh-network
+    restart: unless-stopped
+    depends_on:
+      - alice
+      - bob
+      - charlie
+
+networks:
+  mesh-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
+          gateway: 172.22.0.1
+    enable_ipv6: false
+    labels:
+      - "com.docker.compose.project=mesh-advanced"
+      - "mesh.network.type=p2p"
+
+volumes:
+  logs-alice:
+    driver: local
+  logs-bob:
+    driver: local
+  logs-charlie:
+    driver: local
+  downloads-alice:
+    driver: local
+  downloads-bob:
+    driver: local
+  downloads-charlie:
+    driver: local
+  uploads:
+    driver: local

@@ -49,7 +49,15 @@ def main():
         print("=" * 50)
         
         # Run the app
-        app.run(host='0.0.0.0', port=8080, debug=False)
+        # Поддержка Docker окружения
+        host = os.getenv('HOST', '0.0.0.0')
+        port = int(os.getenv('PORT', 8080))
+        
+        print(f"✅ Web server starting on http://{host}:{port}")
+        print(f"👤 User: {os.getenv('MESSENGER_USERNAME', 'web_user')}")
+        print("📁 File uploads will be stored in ./downloads/uploads")
+        
+        app.run(host=host, port=port, debug=False)
         
     except Exception as e:
         print(f"❌ Failed to start server: {e}")

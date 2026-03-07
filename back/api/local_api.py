@@ -237,7 +237,11 @@ class LocalAPI:
     def _handle_get_peers(self, params: dict) -> dict:
         """Получить список пиров"""
         peers = []
-        for ip, info in self.backend.discovery.get_all_peers().items():
+        
+        # Получаем только реальных пиров
+        real_peers = self.backend.discovery.get_all_peers()
+        
+        for ip, info in real_peers.items():
             # Проверяем, есть ли активный чат
             has_chat = info['username'] in self.backend.active_chats
 

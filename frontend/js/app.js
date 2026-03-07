@@ -7,7 +7,131 @@ let currentUsername = localStorage.getItem('messenger_username') || 'user';
 let transfersPollInterval = null;
 let activeTransfers = {};
 
-console.log('Current username from localStorage:', currentUsername);
+// Enhanced error handling and logging
+const ErrorLogger = {
+    log: (level, message, data = null) => {
+        const timestamp = new Date().toISOString();
+        const logEntry = {
+            timestamp,
+            level,
+            message,
+            data,
+            url: window.location.href,
+            userAgent: navigator.userAgent
+        };
+        
+        console[level](`[${timestamp}] ${message}`, data || '');
+        
+        // Store in localStorage for debugging
+        try {
+            const logs = JSON.parse(localStorage.getItem('app_logs') || '[]');
+            logs.push(logEntry);
+            // Keep only last 100 logs
+            if (logs.length > 100) {
+                logs.splice(0, logs.length - 100);
+            }
+            localStorage.setItem('app_logs', JSON.stringify(logs));
+        } catch (e) {
+            console.error('Failed to store log:', e);
+        }
+    },
+    
+    error: (message, data = null) => ErrorLogger.log('error', message, data),
+    warn: (message, data = null) => ErrorLogger.log('warn', message, data),
+    info: (message, data = null) => ErrorLogger.log('info', message, data),
+    debug: (message, data = null) => ErrorLogger.log('debug', message, data)
+};
+
+// Enhanced fetch with retry and error handling
+const safeFetch = async (url, options = {}, retries = 3) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        return response;
+    } catch (error) {
+        clearTimeout(timeoutId);
+        
+        if (error.name === 'AbortError') {
+            throw new Error('Request timeout');
+        }
+        
+        if (retries > 0) {
+            ErrorLogger.warn(`Retrying request, ${retries} attempts left`, { url, error: error.message });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return safeFetch(url, options, retries - 1);
+        }
+        
+        ErrorLogger.error('Request failed after retries', { url, error: error.message, options });
+        throw error;
+    }
+};
+
+// Connection status monitoring
+const ConnectionMonitor = {
+    isOnline: navigator.onLine,
+    lastCheck: Date.now(),
+    
+    init() {
+        window.addEventListener('online', () => {
+            ErrorLogger.info('Connection restored');
+            ConnectionMonitor.isOnline = true;
+            notifications.success('Соединение восстановлено');
+            
+            // Refresh peers when coming back online
+            fetchPeersPolling();
+        });
+        
+        window.addEventListener('offline', () => {
+            ErrorLogger.warn('Connection lost');
+            ConnectionMonitor.isOnline = false;
+            notifications.error('Потеряно соединение с интернетом');
+        });
+        
+        // Periodic connection check
+        setInterval(() => {
+            const now = Date.now();
+            if (now - ConnectionMonitor.lastCheck > 30000) { // Check every 30 seconds
+                ConnectionMonitor.checkConnection();
+                ConnectionMonitor.lastCheck = now;
+            }
+        }, 5000);
+    },
+    
+    async checkConnection() {
+        try {
+            const response = await safeFetch('/api/current_username', { method: 'HEAD' }, 1);
+            const wasOnline = ConnectionMonitor.isOnline;
+            ConnectionMonitor.isOnline = true;
+            
+            if (!wasOnline) {
+                ErrorLogger.info('Connection detected');
+                notifications.success('Соединение восстановлено');
+                fetchPeersPolling();
+            }
+        } catch (error) {
+            ConnectionMonitor.isOnline = false;
+            if (ConnectionMonitor.isOnline !== false) {
+                ErrorLogger.warn('Connection check failed', { error: error.message });
+            }
+        }
+    }
+};
+
+// Initialize error handling
+ErrorLogger.info('Application starting');
+ConnectionMonitor.init();
 
 class NotificationSystem {
     constructor() {
@@ -217,27 +341,40 @@ function startMessagePolling() {
 
 async function fetchPeersPolling() {
     try {
-        const res = await fetch('/api/peers');
-        if (!res.ok) throw new Error('fetch failed');
-
+        const res = await safeFetch('/api/peers');
         const data = await res.json();
 
-        peers = (data.peers || []).map((p, idx) => ({
-            id: p.username || p.ip || idx,
-            username: p.username || p.ip,
-            ip: p.ip || p.username,
+        // Фильтруем только реальных пиров с валидными данными
+        const realPeers = (data.peers || []).filter(p => 
+            p.username && 
+            p.ip && 
+            p.username !== currentUsername && // Исключаем сами себя
+            p.username.length > 0 && 
+            p.ip.length > 0
+        ).map((p, idx) => ({
+            id: p.device_id || p.username || p.ip,
+            username: p.username,
+            ip: p.ip,
+            device_id: p.device_id,
             ping: Math.floor(Math.random() * 40) + 5,
             online: p.status === 'online',
-            has_chat: p.has_chat || false
+            has_chat: p.has_chat || false,
+            capabilities: p.capabilities || [],
+            last_seen: p.last_seen || Date.now() / 1000
         }));
-    } catch (err) {
-        console.warn('Failed to fetch peers:', err);
 
+        // Обновляем список пиров только если есть реальные данные
+        if (realPeers.length > 0 || data.peers.length === 0) {
+            peers = realPeers;
+            ErrorLogger.info(`Updated peers list: ${peers.length} peers found`, { peers: peers.map(p => p.username) });
+        }
+
+    } catch (err) {
+        ErrorLogger.error('Failed to fetch peers:', err);
+        
+        // Показываем уведомление об ошибке, но не добавляем мок-пиров
         if (peers.length === 0) {
-            peers = [
-                { id: 'test1', username: 'User1', ip: '192.168.1.10', ping: 15, online: true, has_chat: false },
-                { id: 'test2', username: 'User2', ip: '192.168.1.11', ping: 23, online: false, has_chat: false }
-            ];
+            notifications.warning('Не удалось получить список пиров. Проверьте соединение.');
         }
     }
 
@@ -247,6 +384,12 @@ async function fetchPeersPolling() {
         const updated = peers.find(p => p.username === activePeer.username || p.id === activePeer.id);
         if (updated) {
             activePeer = updated;
+            updateHeader();
+        } else {
+            // Если активный пир исчез из списка, сбрасываем выбор
+            ErrorLogger.warn('Active peer disappeared from list', { activePeer: activePeer.username });
+            activePeer = null;
+            renderMessages();
             updateHeader();
         }
     }
@@ -384,37 +527,88 @@ function renderPeers(filter = '') {
     peersList.classList.add('updating');
 
     requestAnimationFrame(() => {
-        const newHTML = filtered.map(peer => `
-            <div class="peer-item ${activePeer && activePeer.id === peer.id ? 'active' : ''}" 
+        const newHTML = filtered.map(peer => {
+            const isSelectable = peer.online && peer.username && peer.ip;
+            const isActive = activePeer && activePeer.id === peer.id;
+            
+            return `
+            <div class="peer-item ${isActive ? 'active' : ''} ${!isSelectable ? 'disabled' : ''}" 
                  data-peer-id="${peer.id}">
-                <div class="avatar" style="background: var(--color-bg-${(peer.username.charCodeAt(0) % 8) + 1});">
+                <div class="avatar" style="background: var(--gradient-primary);">
                     ${getInitials(peer.username)}
                 </div>
                 <div class="peer-info">
-                    <div class="peer-name">${peer.username}</div>
+                    <div class="peer-name">
+                        ${peer.username}
+                        ${!isSelectable ? '<span class="peer-status-indicator">(недоступен)</span>' : ''}
+                    </div>
                     <div class="peer-meta">
                         <span class="peer-ping">
                             <span class="ping-dot ${peer.online ? 'online' : 'offline'}"></span>
                             ${peer.ping}ms
                         </span>
+                        ${peer.has_chat ? '<span class="chat-indicator">💬</span>' : ''}
+                        ${peer.last_seen ? `<span class="last-seen">${formatLastSeen(peer.last_seen)}</span>` : ''}
                     </div>
                 </div>
             </div>
-        `).join('');
+            `;
+        }).join('');
 
         if (peersList.innerHTML !== newHTML) {
             peersList.innerHTML = newHTML;
+            
+            // Добавляем обработчики событий для новых элементов
+            const peerItems = peersList.querySelectorAll('.peer-item:not(.disabled)');
+            peerItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    const peerId = item.dataset.peerId;
+                    const peer = peers.find(p => p.id === peerId);
+                    if (peer && isSelectable) {
+                        selectPeer(peerId);
+                        ErrorLogger.info('Peer selected', { peer: peer.username });
+                    }
+                });
+                
+                // Добавляем hover эффекты
+                item.addEventListener('mouseenter', () => {
+                    if (isSelectable) {
+                        item.style.transform = 'translateX(4px)';
+                    }
+                });
+                
+                item.addEventListener('mouseleave', () => {
+                    item.style.transform = 'translateX(0)';
+                });
+            });
+        }
+
+        // Показываем сообщение если нет пиров
+        if (filtered.length === 0) {
+            peersList.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">🔍</div>
+                    <div class="empty-title">Пиры не найдены</div>
+                    <div class="empty-description">
+                        ${filter ? 'Попробуйте изменить поисковый запрос' : 'Убедитесь, что другие узлы сети запущены'}
+                    </div>
+                </div>
+            `;
         }
 
         peersList.classList.remove('updating');
-
-        document.querySelectorAll('.peer-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const peerId = item.dataset.peerId;
-                selectPeer(peerId);
-            });
-        });
     });
+}
+
+// Функция форматирования времени последнего появления
+function formatLastSeen(timestamp) {
+    const now = Date.now() / 1000;
+    const diff = now - timestamp;
+    
+    if (diff < 60) return 'только что';
+    if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} ч назад`;
+    return `${Math.floor(diff / 86400)} д назад`;
 }
 
 function renderMessages() {
@@ -531,7 +725,44 @@ async function sendMessage() {
     const now = new Date();
     const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Enhanced error handling and retry logic
+    const maxRetries = 3;
+    let retryCount = 0;
+    
+    const sendWithRetry = async (peer, text, retryCount) => {
+        try {
+            const response = await fetch('/api/send_message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ peer: peer, text })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            
+            if (result.error) {
+                throw new Error(result.error);
+            }
+            
+            return result;
+        } catch (error) {
+            console.error(`Send attempt ${retryCount + 1} failed:`, error);
+            
+            if (retryCount < maxRetries - 1) {
+                // Exponential backoff
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+                return sendWithRetry(peer, text, retryCount + 1);
+            }
+            
+            throw error;
+        }
+    };
 
+    // Add message to UI immediately for better UX
     if (text) {
         messages[activePeer.username] = messages[activePeer.username] || [];
         messages[activePeer.username].push({
@@ -546,6 +777,7 @@ async function sendMessage() {
         renderMessages();
     }
 
+    // Add file messages to UI
     if (selectedFiles.length > 0) {
         messages[activePeer.username] = messages[activePeer.username] || [];
         selectedFiles.forEach(item => {
@@ -553,59 +785,70 @@ async function sendMessage() {
                 text: `📎 ${item.file.name}`,
                 time,
                 sent: true,
-                from: currentUsername
+                from: currentUsername,
+                status: 'sending'
             });
         });
         renderMessages();
     }
 
+    // Send text message with retry logic
     if (text) {
         try {
-            const response = await fetch('/api/send_message', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ peer: activePeer.username, text })
-            });
-
-            const result = await response.json();
-
-            const ok = result.success || result.status === 'sent';
-
-            if (ok) {
-                const msgList = messages[activePeer.username];
-                if (msgList) {
-                    for (let i = msgList.length - 1; i >= 0; i--) {
-                        const msg = msgList[i];
-                        if (msg.id === localId || (msg.text === text && msg.status === 'sending')) {
-                            msg.id = result.msg_id || result.timestamp
-                                ? `sent_${result.msg_id || result.timestamp}`
-                                : msg.id;
-                            msg.status = 'sent';
-                            break;
-                        }
+            const result = await sendWithRetry(activePeer.username, text, 0);
+            
+            // Update message status on success
+            const msgList = messages[activePeer.username];
+            if (msgList) {
+                for (let i = msgList.length - 1; i >= 0; i--) {
+                    const msg = msgList[i];
+                    if (msg.id === localId || (msg.text === text && msg.status === 'sending')) {
+                        msg.id = result.msg_id || result.timestamp
+                            ? `sent_${result.msg_id || result.timestamp}`
+                            : msg.id;
+                        msg.status = 'sent';
+                        break;
                     }
                 }
-                saveMessagesToStorage(activePeer.username);
-                renderMessages();
-
-                setTimeout(() => {
-                    if (activePeer && messagesPollInterval) {
-                        clearInterval(messagesPollInterval);
-                        startMessagePolling();
-                    }
-                }, 500);
-            } else {
-                notifications.error(`Ошибка отправки: ${result.error || 'неизвестная ошибка'}`);
             }
-        } catch (err) {
-            console.error('Send error:', err);
-            notifications.error('Ошибка при отправке сообщения');
+            
+            saveMessagesToStorage(activePeer.username);
+            renderMessages();
+            
+            // Refresh messages after a short delay to get any response
+            setTimeout(() => {
+                if (activePeer && messagesPollInterval) {
+                    clearInterval(messagesPollInterval);
+                    startMessagePolling();
+                }
+            }, 1000);
+            
+            notifications.success('Сообщение отправлено');
+            
+        } catch (error) {
+            console.error('Failed to send message after retries:', error);
+            
+            // Update message status to failed
+            const msgList = messages[activePeer.username];
+            if (msgList) {
+                for (let i = msgList.length - 1; i >= 0; i--) {
+                    const msg = msgList[i];
+                    if (msg.id === localId || (msg.text === text && msg.status === 'sending')) {
+                        msg.status = 'failed';
+                        break;
+                    }
+                }
+            }
+            
+            renderMessages();
+            notifications.error(`Ошибка отправки: ${error.message}`);
         }
     }
 
+    // Handle file uploads
     if (selectedFiles.length > 0) {
         const filesToUpload = selectedFiles.slice();
-
+        
         for (const { file, uid } of filesToUpload) {
             try {
                 const res = await uploadFileInChunks(file, activePeer.username, (p) => {
@@ -670,7 +913,8 @@ async function sendMessage() {
             } catch (err) {
                 console.error('Upload failed:', err);
                 const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
-                if (bar) bar.style.background = 'linear-gradient(90deg, var(--color-error), var(--color-error))';
+                if (bar) bar.style.background = 'var(--gradient-warm)';
+                notifications.error(`Ошибка загрузки файла: ${file.name}`);
             }
         }
 
@@ -837,6 +1081,76 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-updateHeader();
-renderPeers();
-renderMessages();
+// Load mesh visualization
+const script = document.createElement('script');
+script.src = 'js/mesh-visualization.js';
+script.onload = () => {
+    // Initialize mesh visualization
+    let meshViz = null;
+    let meshPanelVisible = true;
+    
+    const initMeshVisualization = () => {
+        if (meshViz) {
+            meshViz.destroy();
+        }
+        
+        meshViz = new MeshNetworkVisualization('mesh-visualization');
+        
+        // Handle node selection
+        meshViz.onNodeSelected = (node) => {
+            if (!node.isCurrent) {
+                selectPeer(node.id);
+            }
+        };
+        
+        // Update mesh with current peers
+        updateMeshVisualization();
+    };
+    
+    const updateMeshVisualization = () => {
+        if (!meshViz) return;
+        
+        meshViz.updateFromPeers(peers);
+        
+        // Update stats
+        const nodeCount = document.getElementById('node-count');
+        const edgeCount = document.getElementById('edge-count');
+        const onlineCount = document.getElementById('online-count');
+        
+        if (nodeCount) nodeCount.textContent = peers.length + 1; // +1 for current user
+        if (edgeCount) edgeCount.textContent = peers.length;
+        if (onlineCount) {
+            const onlinePeers = peers.filter(p => p.online).length;
+            onlineCount.textContent = onlinePeers;
+        }
+    };
+    
+    // Toggle mesh panel
+    const toggleMeshBtn = document.getElementById('toggle-mesh');
+    const meshPanel = document.getElementById('mesh-panel');
+    
+    if (toggleMeshBtn && meshPanel) {
+        toggleMeshBtn.addEventListener('click', () => {
+            meshPanelVisible = !meshPanelVisible;
+            if (meshPanelVisible) {
+                meshPanel.classList.remove('hidden');
+                toggleMeshBtn.textContent = 'Скрыть';
+                if (!meshViz) initMeshVisualization();
+            } else {
+                meshPanel.classList.add('hidden');
+                toggleMeshBtn.textContent = 'Показать';
+            }
+        });
+    }
+    
+    // Auto-initialize after delay
+    setTimeout(initMeshVisualization, 1000);
+    
+    // Update mesh when peers change
+    const originalFetchPeersPolling = fetchPeersPolling;
+    fetchPeersPolling = function() {
+        originalFetchPeersPolling.apply(this, arguments);
+        setTimeout(updateMeshVisualization, 500);
+    };
+};
+document.head.appendChild(script);

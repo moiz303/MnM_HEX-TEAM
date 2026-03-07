@@ -306,13 +306,60 @@ function selectPeer(peer) {
     if (fileButton) fileButton.disabled = false;
     if (fileInput) fileInput.disabled = false;
     
-    // Загружаем сообщения с этим пиром
-    loadMessages(peer.username);
+    // Очищаем чат перед открытием нового
+    const chatMessages = document.getElementById('chat-messages');
+    if (chatMessages) {
+        chatMessages.innerHTML = `
+            <div class="chat-placeholder">
+                <div class="chat-placeholder-content">
+                    <h3>💬 Начало чата с ${peer.username}</h3>
+                    <p>Нажмите кнопку ниже чтобы начать обмен сообщениями</p>
+                    <button class="btn primary" onclick="startChatWithPeer('${peer.username}', '${peer.ip || ''}')">
+                        💬 Начать чат
+                    </button>
+                </div>
+            </div>
+        `;
+    }
     
     // Добавляем пира в историю
     addToHistory(peer);
     
-    showNotification(`Открыт чат с ${peer.username}`, 'success');
+    showNotification(`Выбран пир: ${peer.username}`, 'info');
+}
+
+// Начало чата с выбранным пиром
+async function startChatWithPeer(username, ip) {
+    try {
+        console.log(`Начинаем чат с ${username}, IP: ${ip}`);
+        showNotification(`Начинаем чат с ${username}...`, 'info');
+        
+        const response = await fetch('/api/start_chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username: username,
+                ip: ip
+            })
+        });
+        
+        const result = await response.json();
+        console.log('Результат начала чата:', result);
+        
+        if (response.ok) {
+            showNotification(`Чат с ${username} начат`, 'success');
+            // Загружаем сообщения после начала чата
+            await loadMessages(username);
+        } else {
+            showNotification(`Ошибка начала чата: ${result.error}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Ошибка начала чата:', error);
+        showNotification('Ошибка соединения', 'error');
+    }
 }
 
 // Загрузка сообщений

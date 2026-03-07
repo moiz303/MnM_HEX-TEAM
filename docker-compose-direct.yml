@@ -1,0 +1,67 @@
+services:
+  alice:
+    image: python:3.11-slim
+    container_name: mesh-alice
+    working_dir: /app
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        python3 run_server.py
+      "
+    networks:
+      - mesh-net
+    restart: unless-stopped
+
+  bob:
+    image: python:3.11-slim
+    container_name: mesh-bob
+    working_dir: /app
+    ports:
+      - "8081:8080"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        python3 run_server.py
+      "
+    networks:
+      - mesh-net
+    restart: unless-stopped
+
+  charlie:
+    image: python:3.11-slim
+    container_name: mesh-charlie
+    working_dir: /app
+    ports:
+      - "8082:8080"
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    command: >
+      bash -c "
+        pip install -r requirements.txt &&
+        python3 run_server.py
+      "
+    networks:
+      - mesh-net
+    restart: unless-stopped
+
+networks:
+  mesh-net:
+    driver: bridge

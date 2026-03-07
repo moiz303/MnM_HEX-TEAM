@@ -3,7 +3,7 @@
 Централизованное описание всех сетевых констант и структур данных.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 

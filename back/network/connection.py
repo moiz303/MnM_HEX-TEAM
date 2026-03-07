@@ -61,16 +61,21 @@ class ConnectionManager:
     def _handle_connection(self, sock: socket.socket, addr: tuple):
         """Обработка одного соединения"""
         try:
-            # Read message length prefix first (4 bytes)
-            sock.settimeout(10.0)
+            # Enhanced connection handling with timeout
+            sock.settimeout(15.0)  # Increased timeout
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
             
-            # Read length prefix
+            # Read message length prefix first (4 bytes)
             length_data = b''
             while len(length_data) < 4:
-                chunk = sock.recv(4 - len(length_data))
-                if not chunk:
+                try:
+                    chunk = sock.recv(4 - len(length_data))
+                    if not chunk:
+                        return
+                    length_data += chunk
+                except socket.timeout:
+                    print(f"[connection] Timeout reading length from {addr}")
                     return
-                length_data += chunk
             
             message_length = int.from_bytes(length_data, byteorder='big')
             
@@ -78,29 +83,49 @@ class ConnectionManager:
                 print(f"[connection] Message too large from {addr}: {message_length} bytes")
                 return
             
-            # Read the actual message
+            # Read the actual message with progress tracking
             data = b''
             while len(data) < message_length:
-                chunk = sock.recv(min(message_length - len(data), 16384))
-                if not chunk:
-                    break
-                data += chunk
+                try:
+                    chunk_size = min(message_length - len(data), 16384)
+                    chunk = sock.recv(chunk_size)
+                    if not chunk:
+                        break
+                    data += chunk
+                except socket.timeout:
+                    print(f"[connection] Timeout reading message data from {addr}")
+                    return
             
             if len(data) != message_length:
                 print(f"[connection] Incomplete message from {addr}: expected {message_length}, got {len(data)}")
                 return
             
-            message = json.loads(data.decode())
-
-            if self.on_message:
-                self.on_message(message, addr)
-
-        except json.JSONDecodeError as e:
-            print(f"[connection] Invalid JSON from {addr}: {e}, data size: {len(data) if 'data' in locals() else 'unknown'}")
+            # Parse and handle message
+            try:
+                message = json.loads(data.decode())
+                print(f"[connection] Received {message.get('type', 'unknown')} from {addr}")
+                
+                if self.on_message:
+                    self.on_message(message, addr)
+                    
+            except json.JSONDecodeError as e:
+                print(f"[connection] Invalid JSON from {addr}: {e}")
+                return
+            except Exception as e:
+                print(f"[connection] Error processing message from {addr}: {e}")
+                return
+                
+        except ConnectionResetError:
+            print(f"[connection] Connection reset by {addr}")
+        except socket.timeout:
+            print(f"[connection] Connection timeout from {addr}")
         except Exception as e:
             print(f"[connection] Connection error from {addr}: {e}")
         finally:
-            sock.close()
+            try:
+                sock.close()
+            except:
+                pass
 
     def send_to_peer(self, ip: str, data: dict) -> bool:
         """
