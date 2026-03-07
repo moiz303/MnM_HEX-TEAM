@@ -38,8 +38,31 @@ A secure peer-to-peer messenger with end-to-end encryption and file transfer cap
 ### Prerequisites
 - Python 3.8 or higher
 - pip package manager
+- OR Docker & Docker Compose (recommended for cross-platform compatibility)
 
-### Installation
+### Option 1: Docker Deployment (Recommended)
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-username/MnM_HEX-TEAM.git
+   cd MnM_HEX-TEAM
+   ```
+
+2. **Build and run with Docker Compose**
+   ```bash
+   docker-compose up --build
+   ```
+
+3. **Open your browser**
+   Navigate to `http://localhost:8080`
+
+4. **For testing P2P communication** (optional)
+   ```bash
+   docker-compose --profile testing up
+   ```
+   This will start a second instance at `http://localhost:8081`
+
+### Option 2: Manual Python Installation
 
 1. **Clone the repository**
    ```bash
@@ -66,7 +89,60 @@ A secure peer-to-peer messenger with end-to-end encryption and file transfer cap
 5. **Open your browser**
    Navigate to `http://localhost:8080`
 
-## 📖 Usage
+## � Docker Deployment
+
+### Why Use Docker?
+- **Cross-platform compatibility** - Works on Windows, macOS, and Linux
+- **Consistent environment** - No dependency conflicts between systems
+- **Isolated dependencies** - Clean separation from host system
+- **Easy deployment** - Single command to start the application
+
+### Docker Commands
+
+**Start the application:**
+```bash
+docker-compose up --build
+```
+
+**Run in background:**
+```bash
+docker-compose up -d --build
+```
+
+**Stop the application:**
+```bash
+docker-compose down
+```
+
+**View logs:**
+```bash
+docker-compose logs -f
+```
+
+**Testing P2P communication:**
+```bash
+docker-compose --profile testing up
+```
+This starts two instances:
+- Instance 1: `http://localhost:8080`
+- Instance 2: `http://localhost:8081`
+
+### Docker Configuration
+
+The project includes:
+- `Dockerfile` - Multi-stage Python build with security optimizations
+- `docker-compose.yml` - Service orchestration with networking
+- `.dockerignore` - Excludes unnecessary files from build context
+
+### Persistent Data
+
+File uploads and downloads are persisted in:
+- `./downloads/` - Received files
+- `./uploads/` - Sent files
+
+These directories are mounted as volumes and survive container restarts.
+
+## �📖 Usage
 
 ### Basic Setup
 1. **Choose a username** when prompted

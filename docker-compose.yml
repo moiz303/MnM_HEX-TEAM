@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  secure-messenger:
+    build: .
+    container_name: secure-p2p-messenger
+    ports:
+      - "8080:8080"  # Web interface
+      - "8765:8765"  # P2P communication
+    volumes:
+      - ./downloads:/app/downloads
+      - ./uploads:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - messenger-network
+
+  # Optional: Add a second instance for testing P2P communication
+  messenger-peer:
+    build: .
+    container_name: secure-p2p-messenger-peer
+    ports:
+      - "8081:8080"  # Different web port
+      - "8766:8765"  # Different P2P port
+    volumes:
+      - ./downloads-peer:/app/downloads
+      - ./uploads-peer:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - messenger-network
+    profiles:
+      - testing
+
+networks:
+  messenger-network:
+    driver: bridge
+
+volumes:
+  messenger-data:
+    driver: local
