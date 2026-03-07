@@ -182,11 +182,17 @@ def create_app():
                 if name == 'get_messages':
                     peer = params.get('peer')
                     limit = params.get('limit', 50)
+                    only_incoming = params.get('only_incoming', False)
                     # Get chat_id for this peer
                     chat_id = messenger.active_chats.get(peer)
                     if not chat_id:
                         return {'messages': [], 'total': 0, 'count': 0}, 200
-                    msgs_raw = messenger.get_conversation(chat_id, limit)
+                    
+                    if only_incoming:
+                        msgs_raw = messenger.get_incoming_messages(chat_id, limit)
+                    else:
+                        msgs_raw = messenger.get_conversation(chat_id, limit)
+                    
                     # Обрабатываем сообщения как в api.py
                     result = []
                     for msg in msgs_raw:

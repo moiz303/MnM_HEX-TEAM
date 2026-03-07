@@ -190,6 +190,7 @@ async function selectPeerByUsername(username) {
         try {
             const url = new URL('/api/get_messages', window.location.origin);
             url.searchParams.set('peer', activePeer.username);
+            url.searchParams.set('only_incoming', 'true');
             const r = await fetch(url);
             if (!r.ok) return;
             const data = await r.json();
