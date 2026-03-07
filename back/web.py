@@ -260,15 +260,6 @@ def create_app():
                 if name == 'get_my_info':
                     return messenger.get_my_info() if hasattr(messenger, 'get_my_info') else {'username': messenger.username}, 200
 
-                if name == 'send_file':
-                    peer = params.get('peer')
-                    file_path = params.get('file_path')
-                    try:
-                        transfer_id = messenger.send_file(peer, file_path)
-                        return {'status': 'initiated', 'transfer_id': transfer_id}, 200
-                    except Exception as e:
-                        raise ValueError(f'send file failed: {e}')
-
                 if name == 'get_transfers':
                     if hasattr(messenger, 'router') and hasattr(messenger.router, 'file_manager'):
                         transfers = messenger.router.file_manager.get_all_transfers()
@@ -547,9 +538,15 @@ def create_app():
 
         # Now call send_file
         print(f"[web] calling send_file peer={peer} path={file_path}")
-        res, code = call_handler('send_file', {'peer': peer, 'file_path': file_path})
-        print(f"[web] send_file result {res} code {code}")
-        return jsonify(res), code
+        try:
+            res, code = call_handler('send_file', {'peer': peer, 'file_path': file_path})
+            print(f"[web] send_file result {res} code {code}")
+            if code != 200:
+                print(f"[web] send_file failed with code {code}: {res}")
+            return jsonify(res), code
+        except Exception as e:
+            print(f"[web] send_file exception: {e}")
+            return jsonify({'error': f'Send file failed: {str(e)}'}), 500
 
     return app
 

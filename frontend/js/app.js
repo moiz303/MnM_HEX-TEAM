@@ -468,6 +468,16 @@ function sendMessage() {
                                         statusDiv.textContent = 'Ожидание...';
                                         fileItem.appendChild(statusDiv);
                                     }
+                                } else {
+                                    // No transfer_id but response was OK - send as link
+                                    if (res.file_url) {
+                                        const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                                        fetch('/api/send_message', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                                        }).catch(() => {});
+                                    }
                                 }
                             } else {
                                 console.warn('P2P send failed, falling back to link');
@@ -483,6 +493,7 @@ function sendMessage() {
                             }
                         } catch (err) {
                             console.error('Send file failed', err);
+                            // fallback to sending link stored in res.file_url
                             if (res.file_url) {
                                 const fileMsg = `📎 ${file.name} ${res.file_url}`;
                                 fetch('/api/send_message', {
