@@ -1209,6 +1209,8 @@ class FileTransferManager:
                 base_dir = os.path.abspath(os.path.dirname(__file__) + '/../..')
                 base_dir = base_dir.replace('\\', '/')  # Normalize for cross-platform
                 print(f"[file_transfer] 📁 Base directory: {base_dir}")
+                print(f"[file_transfer] 🔍 Checking if {abs_path} starts with {base_dir}")
+                print(f"[file_transfer] 🔍 Path contains '/uploads/': {'/uploads/' in abs_path}")
                 
                 # Проверяем что файл находится в директории проекта или в uploads
                 if abs_path.startswith(base_dir) and '/uploads/' in abs_path:
@@ -1216,6 +1218,8 @@ class FileTransferManager:
                     return True
                 else:
                     print(f"[file_transfer] ❌ File path outside allowed directory: {abs_path}")
+                    print(f"[file_transfer] ❌ Starts with base: {abs_path.startswith(base_dir)}")
+                    print(f"[file_transfer] ❌ Contains uploads: {'/uploads/' in abs_path}")
                     return False
             
             # Check if file exists and is readable
