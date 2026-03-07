@@ -123,8 +123,10 @@ def create_app():
             print(f"[web] Could not start SecureMessenger: {e}")
     elif not remote_client:
         print('[web] Messenger not started - waiting for username')
-
-    if not local_api and not remote_client:
+        # НЕ создаем MockBackend если ждем имя пользователя
+    
+    # Создаем MockBackend только если нет messenger и нет remote_client
+    if not local_api and not remote_client and not messenger:
         print('[web] Falling back to MockBackend')
 
         class MockBackend:
@@ -166,6 +168,7 @@ def create_app():
         return send_from_directory(FRONTEND_DIR, filename)
 
     def call_handler(name, params):
+        global messenger, local_api, remote_client
         params = params or {}
 
         # In-process LocalAPI: call handler functions directly
@@ -443,6 +446,7 @@ def create_app():
 
     @app.route('/api/set_username', methods=['POST'])
     def api_set_username():
+        global messenger, local_api
         """Установить имя пользователя и обновить в discovery"""
         data = request.get_json()
         if not data or 'username' not in data:
