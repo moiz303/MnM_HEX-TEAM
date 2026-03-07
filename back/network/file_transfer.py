@@ -569,6 +569,32 @@ class FileTransferManager:
         print(f"   - chunk_hash: {chunk_hash[:8] if chunk_hash else 'None'}...")
         print(f"   - data_size: {len(chunk_data_hex)} chars")
 
+        # Проверяем есть ли session key для отправителя
+        session_key = self.crypto.get_session_key(sender_id)
+        if not session_key:
+            print(f"[file_transfer] 🔐 No session key for {sender_id}, initiating handshake")
+            try:
+                # Инициируем handshake с отправителем
+                # Для этого нужно получить имя отправителя из discovery
+                peer_info = None
+                for ip, info in self.conn_mgr.discovery.get_all_peers().items():
+                    if ip == sender_id:
+                        peer_info = info
+                        break
+                
+                peer_name = peer_info.get('name') if peer_info else sender_id
+                print(f"[file_transfer] 🤝 Initiating handshake with {peer_name} ({sender_id})")
+                
+                # Вызываем handshake через основной messenger
+                # Это нужно сделать через callback или event system
+                print(f"[file_transfer] ❌ Cannot auto-handshake: need messenger instance")
+                print(f"[file_transfer] ⚠️ Please establish secure session first")
+                return
+                
+            except Exception as e:
+                print(f"[file_transfer] ❌ Auto-handshake failed: {e}")
+                return
+
         # Валидация входных данных
         if not all([transfer_id, chunk_index is not None, chunk_hash, chunk_data_hex]):
             print(f"[file_transfer] ❌ Invalid chunk data: missing required fields")

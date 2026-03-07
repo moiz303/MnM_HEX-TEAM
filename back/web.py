@@ -83,6 +83,15 @@ def create_app():
         local_api = LocalAPI(messenger)
         threading.Thread(target=local_api.start, daemon=True).start()
         print('[web] Started in-process SecureMessenger for file transfer')
+        
+        # Автоматически выполняем handshake с web_user для создания session keys
+        print('[web] 🔐 Auto-initiating handshake with web_user for file transfer')
+        try:
+            messenger.start_chat('web_user')
+            print('[web] ✅ Auto-handshake completed')
+        except Exception as e:
+            print(f'[web] ⚠️ Auto-handshake failed: {e}')
+            
     except Exception as e:
         print(f"[web] Could not start SecureMessenger: {e}")
 
