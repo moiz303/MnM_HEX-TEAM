@@ -66,22 +66,22 @@ def create_app():
 
     # Global variable to store current username
     current_username = None
+    
+    # Initialize current_username from environment or generate
+    import uuid
+    import os
+    
+    username = os.getenv('MESSENGER_USERNAME')
+    if not username:
+        web_user_id = str(uuid.uuid4())[:8]
+        username = f'web_user_{web_user_id}'
+    
+    globals()['current_username'] = username
+    print(f'[web] Current username set to: {username}')
 
     if not remote_client:
         try:
-            # Get username from environment variable or generate unique one
-            import uuid
-            import os
-            
-            # Try to get username from environment variable
-            username = os.getenv('MESSENGER_USERNAME')
-            if not username:
-                # Fallback to unique web user name
-                web_user_id = str(uuid.uuid4())[:8]
-                username = f'web_user_{web_user_id}'
-            
-            # Store globally for dynamic updates
-            globals()['current_username'] = username
+            # Use the already initialized username
             messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
@@ -94,7 +94,8 @@ def create_app():
 
         class MockBackend:
             def __init__(self):
-                self.username = 'web_user'
+                # Use current_username or fallback to web_user
+                self.username = globals().get('current_username', 'web_user')
                 self.device_id = 'mock-device'
                 self.start_time = time.time()
                 self.active_chats = {}
@@ -277,6 +278,13 @@ def create_app():
         limit = int(request.args.get('limit', 50))
         res, code = call_handler('get_messages', {'peer': peer, 'limit': limit})
         return jsonify(res), code
+
+    @app.route('/api/current_username', methods=['GET'])
+    def api_current_username():
+        return jsonify({
+            'username': globals().get('current_username', 'unknown'),
+            'messenger_username': getattr(messenger, 'username', 'no_messenger') if messenger else 'no_messenger'
+        })
 
     @app.route('/api/set_username', methods=['POST'])
     def api_set_username():
