@@ -209,7 +209,7 @@ class SecureMessenger:
                 break
         if sender_username and sender_username in self.active_chats:
             # Send a message about the incoming file
-        msg_text = f"📥 Incoming file: {filename} ({file_size} bytes) - /downloads/{filename}"
+            msg_text = f"📥 Incoming file: {filename} ({file_size} bytes) - /downloads/{filename}"
             self.send_message(sender_username, msg_text)
 
     def start_chat(self, peer_name: str) -> bool:
