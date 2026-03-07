@@ -1,219 +1,158 @@
 #!/usr/bin/env python3
 """
-Единый файл для запуска всех тестов системы Secure P2P Messenger
-Включает:
-- Unit тесты файловой передачи
-- Интеграционные тесты
-- Тесты исправленных кейсов
-- Полный сценарий передачи файлов
+Главный скрипт для запуска всех тестов проекта
 """
 
 import sys
 import os
 import time
 import subprocess
-from pathlib import Path
+import json
+from datetime import datetime
 
-# Добавляем путь к back директории
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'back'))
+# Добавить пути
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
 
-def run_test_file(test_file_path, test_name):
-    """Запуск одного тестового файла"""
-    print(f"\n{'='*80}")
-    print(f"🧪 Running {test_name}")
-    print(f"📁 File: {test_file_path}")
-    print(f"{'='*80}")
+def run_test_suite(script_name, description):
+    """Запустить набор тестов"""
+    print(f"\n{'='*60}")
+    print(f"🧪 {description}")
+    print(f"{'='*60}")
+    
+    start_time = time.time()
     
     try:
-        start_time = time.time()
-        result = subprocess.run(
-            [sys.executable, test_file_path],
-            cwd=os.path.join(os.path.dirname(__file__), '..'),  # Корневая директория
-            capture_output=True,
-            text=True,
-            timeout=60  # 60 секунд таймаут
-        )
+        # Полный путь к скрипту
+        script_path = os.path.join(os.path.dirname(__file__), script_name)
+        
+        # Запуск скрипта
+        result = subprocess.run([
+            sys.executable, script_path
+        ], capture_output=True, text=True, cwd=os.path.dirname(__file__))
         
         duration = time.time() - start_time
         
         if result.returncode == 0:
-            print(f"✅ {test_name}: PASSED ({duration:.2f}s)")
-            print("📋 Output:")
-            print(result.stdout)
-            return True
+            print(f"✅ {description} завершен успешно")
+            print(f"⏱️ Длительность: {duration:.1f} сек")
+            
+            # Вывод результатов
+            if "Общая оценка:" in result.stdout:
+                for line in result.stdout.split('\n'):
+                    if "Общая оценка:" in line:
+                        print(f"📊 {line.strip()}")
+                        break
         else:
-            print(f"❌ {test_name}: FAILED ({duration:.2f}s)")
-            print("📋 Output:")
-            print(result.stdout)
+            print(f"❌ {description} завершился с ошибкой")
+            print(f"⏱️ Длительность: {duration:.1f} сек")
             if result.stderr:
-                print("📋 Errors:")
-                print(result.stderr)
-            return False
-            
-    except subprocess.TimeoutExpired:
-        print(f"⏰ {test_name}: TIMEOUT (60s)")
-        return False
-    except Exception as e:
-        print(f"💥 {test_name}: ERROR - {e}")
-        return False
-
-def run_import_test():
-    """Тест импорта всех модулей"""
-    print(f"\n{'='*80}")
-    print("🔍 Testing Module Imports")
-    print(f"{'='*80}")
-    
-    try:
-        # Тест импорта основных модулей
-        modules_to_test = [
-            'core.crypto',
-            'core.exceptions', 
-            'core.secure_memory',
-            'network.connection',
-            'network.discovery',
-            'network.file_transfer',
-            'network.onion_router',
-            'network.protocols',
-            'messaging.handshake',
-            'storage.database',
-            'api',
-            'main'
-        ]
+                print(f"🔍 Ошибка: {result.stderr.strip()}")
         
-        failed_imports = []
-        
-        for module in modules_to_test:
-            try:
-                __import__(module)
-                print(f"✅ {module}")
-            except ImportError as e:
-                print(f"❌ {module}: {e}")
-                failed_imports.append(module)
-        
-        if failed_imports:
-            print(f"\n❌ {len(failed_imports)} modules failed to import")
-            return False
-        else:
-            print(f"\n✅ All {len(modules_to_test)} modules imported successfully")
-            return True
-            
-    except Exception as e:
-        print(f"💥 Import test error: {e}")
-        return False
-
-def run_basic_functionality_test():
-    """Базовый тест функциональности"""
-    print(f"\n{'='*80}")
-    print("🔧 Testing Basic Functionality")
-    print(f"{'='*80}")
-    
-    try:
-        from core.crypto import SecureCryptoCore
-        from network.file_transfer import FileTransferManager
-        from network.protocols import MessageType, Limits
-        from network.onion_router import OnionRouter
-        
-        # Тест криптографии
-        crypto = SecureCryptoCore('test_device')
-        print("✅ SecureCryptoCore initialization")
-        
-        # Тест файлового менеджера с mock объектами
-        class MockCrypto:
-            def get_session_key(self, peer_id):
-                return b'test_key_123456789012345678901234'
-        
-        class MockConnMgr:
-            def send_to_peer(self, ip, data):
-                return True
-        
-        manager = FileTransferManager(MockConnMgr(), MockCrypto())
-        print("✅ FileTransferManager initialization")
-        
-        # Тест onion router
-        router = OnionRouter(MockConnMgr(), MockCrypto())
-        print("✅ OnionRouter initialization")
-        
-        # Тест протоколов
-        assert MessageType.FILE_OFFER == "file_offer"
-        assert Limits.MAX_FILE_SIZE > 0
-        print("✅ Protocol constants")
-        
-        return True
+        return {
+            'success': result.returncode == 0,
+            'duration': duration,
+            'stdout': result.stdout,
+            'stderr': result.stderr
+        }
         
     except Exception as e:
-        print(f"❌ Basic functionality test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        print(f"❌ Критическая ошибка при запуске {description}: {e}")
+        return {
+            'success': False,
+            'duration': time.time() - start_time,
+            'error': str(e)
+        }
 
 def main():
-    """Запуск всех тестов"""
-    print("🚀 Starting Comprehensive Test Suite")
-    print("🔧 Secure P2P Messenger - All Tests")
-    print(f"📅 {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📍 Working Directory: {os.getcwd()}")
+    """Основная функция"""
+    print("🚀 Запуск всех тестов проекта")
+    print(f"📅 Время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"📁 Директория: {os.path.dirname(__file__)}")
     
-    # Список всех тестов
-    tests = [
-        ("Module Imports", run_import_test),
-        ("Basic Functionality", run_basic_functionality_test),
-        ("File Transfer System", "tests/test_file_transfer.py"),
-        ("Integration Tests", "tests/test_integration.py"), 
-        ("File Transfer Fixes", "tests/test_file_transfer_fixes.py"),
-        ("Complete File Transfer Scenario", "tests/test_complete_file_transfer.py"),
+    total_start_time = time.time()
+    test_results = []
+    
+    # 1. Интегрированные тесты (все компоненты)
+    test_results.append(run_test_suite(
+        'integrated/integrated_test_suite.py',
+        'Интегрированные тесты (Mesh + Шифрование + Файлы)'
+    ))
+    
+    # 2. Быстрый тест mesh-сети
+    test_results.append(run_test_suite(
+        'mesh/mesh_test_suite.py',
+        'Быстрый тест Mesh-сети'
+    ))
+    
+    # 3. Примеры тестов
+    examples = [
+        ('examples/quick_test.py', 'Пример быстрого теста'),
+        ('examples/manual_test.py', 'Пример ручного теста'),
+        ('examples/stress_test.py', 'Пример нагрузочного теста')
     ]
     
-    results = []
-    total_start_time = time.time()
+    for script, description in examples:
+        test_results.append(run_test_suite(script, description))
     
-    for test_name, test_func in tests:
-        if callable(test_func):
-            # Встроенная функция теста
-            success = test_func()
-        else:
-            # Внешний тестовый файл
-            success = run_test_file(test_func, test_name)
-        
-        results.append((test_name, success))
-        
-        # Небольшая пауза между тестами
-        time.sleep(0.5)
-    
-    # Итоговые результаты
+    # Итоги
     total_duration = time.time() - total_start_time
-    passed = sum(1 for _, success in results if success)
-    total = len(results)
+    successful_tests = sum(1 for r in test_results if r['success'])
+    total_tests = len(test_results)
     
-    print(f"\n{'='*80}")
-    print("📊 FINAL TEST RESULTS")
-    print(f"{'='*80}")
-    print(f"⏱️  Total Duration: {total_duration:.2f} seconds")
-    print(f"📈 Tests Passed: {passed}/{total}")
-    print(f"📊 Success Rate: {(passed/total)*100:.1f}%")
+    print(f"\n{'='*60}")
+    print("🎯 ИТОГИ ВСЕХ ТЕСТОВ")
+    print(f"{'='*60}")
+    print(f"📊 Всего тестов: {total_tests}")
+    print(f"✅ Успешных: {successful_tests}")
+    print(f"❌ Неудачных: {total_tests - successful_tests}")
+    print(f"⏱️ Общая длительность: {total_duration:.1f} сек")
+    print(f"📈 Успешность: {(successful_tests/total_tests*100):.1f}%")
     
-    print(f"\n📋 Detailed Results:")
-    for test_name, success in results:
-        status = "✅ PASSED" if success else "❌ FAILED"
-        print(f"  {status} {test_name}")
+    # Детальная статистика
+    print(f"\n📋 Детальная статистика:")
+    for i, result in enumerate(test_results, 1):
+        status = "✅" if result['success'] else "❌"
+        print(f"  {i}. {status} {result.get('duration', 0):.1f} сек")
     
-    if passed == total:
-        print(f"\n🎉 ALL TESTS PASSED! 🎉")
-        print("✨ System is ready for production use!")
-        return True
+    # Сохранение отчета
+    report = {
+        'timestamp': datetime.now().isoformat(),
+        'total_duration': total_duration,
+        'total_tests': total_tests,
+        'successful_tests': successful_tests,
+        'success_rate': successful_tests/total_tests*100,
+        'test_results': [
+            {
+                'index': i+1,
+                'success': result['success'],
+                'duration': result.get('duration', 0),
+                'error': result.get('error')
+            }
+            for i, result in enumerate(test_results)
+        ]
+    }
+    
+    reports_dir = os.path.join(os.path.dirname(__file__), 'reports')
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    report_file = os.path.join(reports_dir, f'all_tests_report_{int(time.time())}.json')
+    with open(report_file, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    
+    print(f"\n💾 Отчет сохранен: {report_file}")
+    
+    # Рекомендации
+    if successful_tests == total_tests:
+        print("\n🎉 Отлично! Все тесты пройдены успешно!")
+    elif successful_tests >= total_tests * 0.8:
+        print("\n✅ Хорошо! Большинство тестов пройдены.")
+    elif successful_tests >= total_tests * 0.5:
+        print("\n⚠️ Требуется внимание. Некоторые тесты не пройдены.")
     else:
-        print(f"\n⚠️  {total - passed} test(s) failed")
-        print("🔧 Please review and fix the failing tests before deployment")
-        return False
+        print("\n❌ Критические проблемы. Большинство тестов не пройдены.")
+    
+    print(f"\n🌐 Проверьте детальные отчеты в папке: {reports_dir}")
 
-if __name__ == '__main__':
-    try:
-        success = main()
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        print("\n⏹️  Tests interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n💥 Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+if __name__ == "__main__":
+    main()
