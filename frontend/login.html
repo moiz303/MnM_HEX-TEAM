@@ -107,20 +107,23 @@
                 // Сохраняем имя в localStorage
                 localStorage.setItem('messenger_username', username);
                 
-                // Перезапускаем сервер с новым именем
+                // Устанавливаем имя на сервере
                 const response = await fetch('/api/set_username', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username })
                 });
                 
+                const result = await response.json();
+                
                 if (response.ok) {
-                    // Перезагружаем страницу через 1 секунду
+                    alert(`✅ ${result.message}`);
+                    // Перенаправляем на главную страницу через 1 секунду
                     setTimeout(() => {
-                        window.location.reload();
+                        window.location.href = '/';
                     }, 1000);
                 } else {
-                    alert('Ошибка установки имени пользователя');
+                    alert(`❌ Ошибка: ${result.error}`);
                 }
             } catch (error) {
                 console.error('Error:', error);

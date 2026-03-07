@@ -64,6 +64,9 @@ def create_app():
     except Exception:
         remote_client = None
 
+    # Global variable to store current username
+    current_username = None
+
     if not remote_client:
         try:
             # Get username from environment variable or generate unique one
@@ -77,6 +80,8 @@ def create_app():
                 web_user_id = str(uuid.uuid4())[:8]
                 username = f'web_user_{web_user_id}'
             
+            # Store globally for dynamic updates
+            globals()['current_username'] = username
             messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
@@ -228,7 +233,7 @@ def create_app():
 
                         result.append({
                             'msg_id': f"msg_{timestamp}",
-                            'from': 'me' if sender == messenger.username else sender,
+                            'from': 'me' if sender == globals().get('current_username', messenger.username) else sender,
                             'text': text,
                             'timestamp': timestamp,
                             'status': 'delivered' if delivered else 'sent'
@@ -285,15 +290,14 @@ def create_app():
             if len(username) > 20:
                 return jsonify({'error': 'Username too long (max 20 chars)'}), 400
             
-            # В реальном приложении здесь нужно перезапустить сервер с новым именем
-            # Для простоты просто сохраним имя и вернем успех
-            print(f"📝 User wants to set username: {username}")
-            print("⚠️  Please restart the server with:")
-            print(f"   MESSENGER_USERNAME={username} .venv/bin/python back/web.py")
+            # Update global username
+            globals()['current_username'] = username
+            
+            print(f"📝 Username updated to: {username}")
             
             return jsonify({
                 'success': True,
-                'message': f'Username {username} set. Please restart server manually.',
+                'message': f'Username {username} set successfully!',
                 'username': username
             }), 200
             

@@ -9,6 +9,9 @@ let callSeconds = 0;
 let localStream = null;
 let messagesPollInterval = null;
 
+// Username management
+let currentUsername = localStorage.getItem('messenger_username') || 'user';
+
 const peersList = document.getElementById('peers-list');
 const messagesArea = document.getElementById('messages-area');
 const messageInput = document.getElementById('message-input');
@@ -18,6 +21,49 @@ const headerAvatar = document.getElementById('header-avatar');
 const headerName = document.getElementById('header-name');
 const headerStatus = document.getElementById('header-status');
 const voiceCallBtn = document.getElementById('voice-call-btn');
+
+// Function to change username
+function changeUsername() {
+    const newUsername = prompt('Введите новое имя пользователя:', currentUsername);
+    if (newUsername && newUsername.trim() && newUsername !== currentUsername) {
+        const username = newUsername.trim();
+        
+        if (username.length > 20) {
+            alert('Имя слишком длинное (максимум 20 символов)');
+            return;
+        }
+        
+        fetch('/api/set_username', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                currentUsername = username;
+                localStorage.setItem('messenger_username', username);
+                alert(`✅ Имя изменено на: ${username}`);
+                // Обновляем интерфейс если нужно
+                updateHeader();
+            } else {
+                alert(`❌ Ошибка: ${result.error}`);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Произошла ошибка. Попробуйте снова.');
+        });
+    }
+}
+
+// Add keyboard shortcut for username change (Ctrl+U)
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        changeUsername();
+    }
+});
 const videoCallBtn = document.getElementById('video-call-btn');
 const deleteChatBtn = document.getElementById('delete-chat-btn');
 const callModal = document.getElementById('call-modal');
