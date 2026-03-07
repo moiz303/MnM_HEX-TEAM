@@ -54,4 +54,3 @@ tmp/
 temp/
 
 node_modules/
-back/network/file_transfer.py

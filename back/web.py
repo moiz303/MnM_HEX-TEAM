@@ -1,29 +1,36 @@
+"""
+Flask web interface for Secure P2P Messenger.
+
+Provides REST API endpoints and serves frontend with file upload capabilities.
+"""
+
+import json
 import os
+import socket
 import threading
 import time
-import json
-import socket
 import uuid
-from flask import Flask, jsonify, request, send_from_directory, abort
+from flask import Flask, abort, jsonify, request, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# Import backend classes (runs in-process)
+# Import backend classes
 from main import SecureMessenger
-# use our API handler implementation rather than any unrelated package
+
 try:
     from back.api import LocalAPI
 except ImportError:
     from api import LocalAPI
 
 SOCKET_PATH = "/tmp/secure_chat.sock"
-
 BASE_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
 FRONTEND_DIR = os.path.join(BASE_DIR, 'frontend')
 
 
 class UnixLocalAPIClient:
-    def __init__(self, path):
+    """Unix socket client for LocalAPI communication."""
+    
+    def __init__(self, path: str):
         self.path = path
         self._id = 1
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -33,16 +40,20 @@ class UnixLocalAPIClient:
         except Exception:
             self.sock = None
 
-    def call(self, method, params=None):
+    def call(self, method: str, params: dict = None):
+        """Call LocalAPI method via Unix socket."""
         if not self.sock:
             raise RuntimeError('No connection to LocalAPI')
+            
         req = {'id': self._id, 'method': method, 'params': params or {}}
         self._id += 1
         data = (json.dumps(req) + '\n').encode()
+        
         self.sock.sendall(data)
         line = self.sock_file.readline()
         if not line:
             raise RuntimeError('Empty response from LocalAPI')
+            
         resp = json.loads(line.decode())
         if 'error' in resp:
             raise RuntimeError(resp['error'])
@@ -344,7 +355,7 @@ def create_app():
     @app.route('/api/transfer/<transfer_id>/cancel', methods=['POST'])
     def api_cancel_transfer(transfer_id):
         res, code = call_handler('cancel_transfer', {'transfer_id': transfer_id})
-        return jsonify(res), code)
+        return jsonify(res), code
 
     @app.route('/api/debug_backend', methods=['GET'])
     def api_debug_backend():
@@ -366,8 +377,9 @@ def create_app():
     os.makedirs(TMP_ROOT, exist_ok=True)
     os.makedirs(UPLOAD_ROOT, exist_ok=True)
 
-    # keep mapping of upload_id -> file path to avoid glob issues
+    # Thread-safe maps for uploads
     uploads_map = {}
+    uploads_lock = threading.Lock()
 
     @app.route('/api/upload/init', methods=['POST'])
     def api_upload_init():
@@ -461,7 +473,9 @@ def create_app():
             pass
 
         # record mapping so send_uploaded_file can find it easily
-        uploads_map[upload_id] = out_path
+        # Thread-safe update
+        with uploads_lock:
+            uploads_map[upload_id] = out_path
 
         file_url = f"/uploads/{out_name}"
         return jsonify({'file_url': file_url, 'filename': safe_name, 'upload_id': upload_id}), 200
@@ -491,8 +505,11 @@ def create_app():
             print(f"[web] missing data")
             return jsonify({'error': 'upload_id and peer required'}), 400
 
-        # lookup path from map first
-        file_path = uploads_map.get(upload_id)
+        # Thread-safe lookup with lock
+        file_path = None
+        with uploads_lock:
+            file_path = uploads_map.get(upload_id)
+            
         if not file_path or not os.path.exists(file_path):
             # fallback to scanning directory
             import glob
@@ -503,11 +520,24 @@ def create_app():
                 print(f"[web] file not found for upload_id {upload_id}")
                 return jsonify({'error': 'file not found'}), 404
             file_path = matches[0]
-            uploads_map[upload_id] = file_path
+            # Thread-safe update
+            with uploads_lock:
+                uploads_map[upload_id] = file_path
         else:
             print(f"[web] found file_path {file_path} via map")
 
         print(f"[web] file {file_path} exists: {os.path.exists(file_path)}, size: {os.path.getsize(file_path) if os.path.exists(file_path) else 0}")
+
+        # Additional validation
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                return jsonify({'error': 'file is empty'}), 400
+            if file_size > 200 * 1024 * 1024:  # 200MB limit
+                return jsonify({'error': 'file too large'}), 400
+        except Exception as e:
+            print(f"[web] file validation error: {e}")
+            return jsonify({'error': 'file validation failed'}), 400
 
         # Now call send_file
         print(f"[web] calling send_file peer={peer} path={file_path}")
