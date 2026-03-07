@@ -54,24 +54,35 @@ class ConnectionManager:
     def _handle_connection(self, sock: socket.socket, addr: tuple):
         """Обработка одного соединения"""
         try:
-            # Read all available data in chunks until connection closes
-            data = b''
-            sock.settimeout(10.0)  # 10 second timeout for receiving complete message
-            try:
-                while True:
-                    chunk = sock.recv(16384)  # Read in 16KB chunks
-                    if not chunk:
-                        break
-                    data += chunk
-                    # If we received less than chunk size, likely end of message
-                    if len(chunk) < 16384:
-                        break
-            except socket.timeout:
-                pass  # Expected when all data received
+            # Read message length prefix first (4 bytes)
+            sock.settimeout(10.0)
             
-            if not data:
+            # Read length prefix
+            length_data = b''
+            while len(length_data) < 4:
+                chunk = sock.recv(4 - len(length_data))
+                if not chunk:
+                    return
+                length_data += chunk
+            
+            message_length = int.from_bytes(length_data, byteorder='big')
+            
+            if message_length > Limits.MAX_MESSAGE_SIZE:
+                print(f"[connection] Message too large from {addr}: {message_length} bytes")
                 return
-
+            
+            # Read the actual message
+            data = b''
+            while len(data) < message_length:
+                chunk = sock.recv(min(message_length - len(data), 16384))
+                if not chunk:
+                    break
+                data += chunk
+            
+            if len(data) != message_length:
+                print(f"[connection] Incomplete message from {addr}: expected {message_length}, got {len(data)}")
+                return
+            
             message = json.loads(data.decode())
 
             if self.on_message:
@@ -94,14 +105,18 @@ class ConnectionManager:
         try:
             import json
             json_data = json.dumps(data).encode()
+            
             if len(json_data) > Limits.MAX_MESSAGE_SIZE:
                 print(f"[connection] Message to {ip} too large: {len(json_data)} > {Limits.MAX_MESSAGE_SIZE}")
                 return False
 
+            # Add length prefix (4 bytes big-endian)
+            message_with_prefix = len(json_data).to_bytes(4, byteorder='big') + json_data
+
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(Timeouts.CONNECTION)
                 sock.connect((ip, MESSAGE_PORT))
-                sock.sendall(json_data)
+                sock.sendall(message_with_prefix)
                 return True
         except (socket.timeout, ConnectionRefusedError):
             return False

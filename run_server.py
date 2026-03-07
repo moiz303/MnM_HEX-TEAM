@@ -29,7 +29,7 @@ def main():
         
         app = create_app()
         
-        print("✅ Web server starting on http://localhost:5000")
+        print("✅ Web server starting on http://localhost:8080")
         print("📁 File uploads will be stored in ./downloads/uploads")
         print("🔗 API endpoints available at:")
         print("   - POST /api/upload/init")
@@ -40,7 +40,7 @@ def main():
         print("   - GET /api/transfer/<id>")
         print("   - POST /api/transfer/<id>/cancel")
         print("\n📝 Test steps:")
-        print("1. Open http://localhost:5000 in your browser")
+        print("1. Open http://localhost:8080 in your browser")
         print("2. Connect to a peer or use test mode")
         print("3. Try sending a file to test the transfer")
         print("4. Check browser console for transfer progress")
@@ -48,7 +48,7 @@ def main():
         print("=" * 50)
         
         # Run the app
-        app.run(host='0.0.0.0', port=5000, debug=False)
+        app.run(host='0.0.0.0', port=8080, debug=False)
         
     except Exception as e:
         print(f"❌ Failed to start server: {e}")
