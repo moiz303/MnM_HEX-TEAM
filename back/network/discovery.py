@@ -59,6 +59,27 @@ class PeerDiscovery:
         if self.listen_socket:
             self.listen_socket.close()
 
+    def _broadcast_presence(self):
+        """Принудительная отправка presence сообщения"""
+        if not self.broadcast_socket:
+            return
+        
+        try:
+            presence = {
+                'type': 'presence',
+                'username': self.username,
+                'device_id': self.device_id,
+                'public_key': self.public_key_b64,
+                'port': MESSAGE_PORT,
+                'timestamp': time.time()
+            }
+            self.broadcast_socket.sendto(
+                json.dumps(presence).encode(),
+                ('<broadcast>', BROADCAST_PORT)
+            )
+        except Exception as e:
+            print(f"Manual broadcast error: {e}")
+
     def _broadcast_loop(self):
         """Периодическая рассылка информации о себе"""
         while self.running:

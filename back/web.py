@@ -7,6 +7,21 @@ import uuid
 from flask import Flask, jsonify, request, send_from_directory, abort, redirect
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
+import logging
+
+# Отключаем логирование для конкретных маршрутов
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
+# Создаем кастомный фильтр для отключения логов частых запросов
+class FrequentRequestsFilter(logging.Filter):
+    def filter(self, record):
+        message = record.getMessage()
+        # Отключаем логи для частых API запросов
+        frequent_paths = ['/api/peers', '/api/get_messages', '/api/current_username']
+        return not any(path in message for path in frequent_paths)
+
+log.addFilter(FrequentRequestsFilter())
 
 # Import backend classes (runs in-process)
 from main import SecureMessenger
@@ -48,6 +63,10 @@ class UnixLocalAPIClient:
 def create_app():
     app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
     CORS(app)
+    
+    # Настройка логирования
+    app.logger.setLevel(logging.WARNING)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
     # Prefer connecting to an existing LocalAPI over UNIX socket (another process).
     # If that fails, start SecureMessenger in-process and expose a LocalAPI server.
@@ -298,29 +317,36 @@ def create_app():
 
     @app.route('/api/set_username', methods=['POST'])
     def api_set_username():
-        try:
-            data = request.get_json()
-            username = data.get('username', '').strip()
-            
-            if not username:
-                return jsonify({'error': 'Username required'}), 400
-            
-            if len(username) > 20:
-                return jsonify({'error': 'Username too long (max 20 chars)'}), 400
-            
-            # Update global username
-            globals()['current_username'] = username
-            
-            print(f"📝 Username updated to: {username}")
-            
-            return jsonify({
-                'success': True,
-                'message': f'Username {username} set successfully!',
-                'username': username
-            }), 200
-            
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+        """Установить имя пользователя и обновить в discovery"""
+        data = request.get_json()
+        if not data or 'username' not in data:
+            return jsonify({'success': False, 'error': 'Username required'}), 400
+        
+        username = data['username'].strip()
+        if not username or len(username) > 20:
+            return jsonify({'success': False, 'error': 'Invalid username'}), 400
+        
+        # Обновляем глобальное имя
+        globals()['current_username'] = username
+        
+        # Обновляем имя в messenger если доступен
+        if messenger and hasattr(messenger, 'username'):
+            messenger.username = username
+            # Обновляем имя в discovery
+            if hasattr(messenger, 'discovery'):
+                messenger.discovery.username = username
+                # Принудительно отправляем новый broadcast с обновленным именем
+                if hasattr(messenger.discovery, '_broadcast_presence'):
+                    try:
+                        messenger.discovery._broadcast_presence()
+                        print(f'[web] Sent updated broadcast with username: {username}')
+                    except Exception as e:
+                        print(f'[web] Failed to send broadcast: {e}')
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Имя установлено: {username}'
+        })
 
     @app.route('/api/my_info', methods=['GET'])
     def api_my_info():

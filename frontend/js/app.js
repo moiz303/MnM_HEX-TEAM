@@ -300,15 +300,20 @@ async function selectPeerByUsername(username) {
     // If no active chat, try to initiate handshake
     if (!activePeer.has_chat) {
         try {
+            // Используем IP вместо username для начала чата
             const res = await fetch('/api/start_chat', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: activePeer.username })
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    username: activePeer.ip || activePeer.username,
+                    ip: activePeer.ip 
+                })
             });
             if (res.ok) {
                 activePeer.has_chat = true;
             }
         } catch (e) {
-            // ignore
+            console.error('Failed to start chat:', e);
         }
     }
 
@@ -343,30 +348,55 @@ async function selectPeerByUsername(username) {
     if (messagesPollInterval) clearInterval(messagesPollInterval);
     messagesPollInterval = setInterval(async () => {
         try {
+            // Пробуем сначала по username, потом по IP
             const url = new URL('/api/get_messages', window.location.origin);
             url.searchParams.set('peer', activePeer.username);
-            url.searchParams.set('only_incoming', 'true');
             const r = await fetch(url);
-            if (!r.ok) return;
-            const data = await r.json();
-            const mapped = (data.messages || []).map(m => ({
-                id: m.msg_id || `${m.timestamp}_${Math.random()}`,
-                text: m.text || '',
-                from: m.from || activePeer.username,
-                time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-                sent: m.from === 'me'
-            }));
-
-            // merge deduplicated (by id)
-            const existing = messages[activePeer.username] || [];
-            const existingIds = new Set(existing.map(x => x.id));
-            const merged = existing.concat(mapped.filter(x => !existingIds.has(x.id)));
-            // sort by time (we store in chronological order)
-            merged.sort((a, b) => a.time.localeCompare(b.time));
-            messages[activePeer.username] = merged;
-            renderMessages();
+            if (r.ok) {
+                const data = await r.json();
+                if (data.messages && data.messages.length > 0) {
+                    const mapped = data.messages.map(m => ({
+                        id: m.id || Math.random().toString(36).substr(2, 9),
+                        from: m.from || 'unknown',
+                        text: m.text || '',
+                        time: m.time || new Date().toISOString(),
+                        sent: m.from === currentUsername
+                    }));
+                    
+                    const existing = messages[activePeer.username] || [];
+                    const existingIds = new Set(existing.map(x => x.id));
+                    const merged = existing.concat(mapped.filter(x => !existingIds.has(x.id)));
+                    merged.sort((a, b) => a.time.localeCompare(b.time));
+                    messages[activePeer.username] = merged;
+                    renderMessages();
+                }
+            } else {
+                // Если не получилось по username, пробуем по IP
+                const url2 = new URL('/api/get_messages', window.location.origin);
+                url2.searchParams.set('peer', activePeer.ip);
+                const r2 = await fetch(url2);
+                if (r2.ok) {
+                    const data = await r2.json();
+                    if (data.messages && data.messages.length > 0) {
+                        const mapped = data.messages.map(m => ({
+                            id: m.id || Math.random().toString(36).substr(2, 9),
+                            from: m.from || 'unknown',
+                            text: m.text || '',
+                            time: m.time || new Date().toISOString(),
+                            sent: m.from === currentUsername
+                        }));
+                        
+                        const existing = messages[activePeer.username] || [];
+                        const existingIds = new Set(existing.map(x => x.id));
+                        const merged = existing.concat(mapped.filter(x => !existingIds.has(x.id)));
+                        merged.sort((a, b) => a.time.localeCompare(b.time));
+                        messages[activePeer.username] = merged;
+                        renderMessages();
+                    }
+                }
+            }
         } catch (e) {
-            // ignore polling errors
+            console.error('Failed to load messages:', e);
         }
     }, 1000);
 }
