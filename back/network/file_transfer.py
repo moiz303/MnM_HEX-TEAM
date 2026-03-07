@@ -682,14 +682,14 @@ class FileTransferManager:
                     import secrets
                     
                     # Используем тот же ключ что и для device_id
-                    encrypt_key = existing_key.encrypt_key.read()  # Получаем данные из SecureMemory
-                    mac_key = existing_key.mac_key.read()        # Получаем данные из SecureMemory
+                    encrypt_key_bytes = existing_key.encrypt_key.read()  # Получаем данные из SecureMemory
+                    mac_key_bytes = existing_key.mac_key.read()        # Получаем данные из SecureMemory
                     
-                    # Сохраняем под IP адресом
+                    # Сохраняем под IP адресом (SessionKeys ожидает bytes, не SecureMemory)
                     ip_session_id = f"ip_{sender_id.replace('.', '_')}"
                     self.crypto._session_keys[ip_session_id] = SessionKeys(
-                        encrypt_key=encrypt_key,
-                        mac_key=mac_key,
+                        encrypt_key=encrypt_key_bytes,  # bytes, не SecureMemory
+                        mac_key=mac_key_bytes,          # bytes, не SecureMemory
                         peer_id=sender_id  # IP адрес как peer_id
                     )
                     
