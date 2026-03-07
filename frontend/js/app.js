@@ -5,6 +5,10 @@ let messages = {};
 let selectedFiles = []; // array of {file, uid}
 let messagesPollInterval = null;
 
+// Debug: Log when script loads
+console.log('SGram app.js loaded successfully');
+console.log('Current username from localStorage:', localStorage.getItem('messenger_username'));
+
 // Function to deselect current peer
 function deselectPeer() {
     activePeer = null;
@@ -60,6 +64,7 @@ function startMessagePolling() {
                             merged.sort((a, b) => a.time.localeCompare(b.time));
                             messages[activePeer.username] = merged;
                             renderMessages();
+                            saveMessagesToStorage(activePeer.username);
                         }
                     }
                 } else {
@@ -87,6 +92,7 @@ function startMessagePolling() {
                                 merged.sort((a, b) => a.time.localeCompare(b.time));
                                 messages[activePeer.username] = merged;
                                 renderMessages();
+                                saveMessagesToStorage(activePeer.username);
                             }
                         }
                     }
@@ -102,9 +108,9 @@ function startMessagePolling() {
 let currentUsername = localStorage.getItem('messenger_username') || 'user';
 
 // Check if user has name, if not - redirect to login
-if (!localStorage.getItem('messenger_username')) {
-    window.location.href = '/login';
-}
+// if (!localStorage.getItem('messenger_username')) {
+//     window.location.href = '/login';
+// }
 
 // Система уведомлений
 class NotificationSystem {
@@ -504,7 +510,7 @@ function renderMessages() {
                         // no url -> plain text (escape minimal)
                         return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     })()}</div>
-                    <span class="message-time">${msg.time}</span>
+                    <span class="message-time">${msg.time}${msg.status === 'sending' ? ' (отправка...)' : ''}</span>
                 </div>
                 ${msg.sent ? `
                     <div class="message-avatar">
@@ -545,7 +551,14 @@ function sendMessage() {
     // locally append
     if (text) {
         if (!messages[activePeer.username]) messages[activePeer.username] = [];
-        messages[activePeer.username].push({ text, time, sent: true, from: 'me' });
+        messages[activePeer.username].push({ 
+            text, 
+            time, 
+            sent: true, 
+            from: 'me',
+            id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            status: 'sending'
+        });
     }
 
     if (selectedFiles.length > 0) {
@@ -565,8 +578,46 @@ function sendMessage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ peer: activePeer.username, text })
-        }).catch(() => {
-            // ignore send errors for now
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.status === 'sent') {
+                console.log('Message sent successfully:', result);
+                // Update the last message with sent status and timestamp
+                const msgList = messages[activePeer.username];
+                if (msgList && msgList.length > 0) {
+                    // Find the most recent message with 'sending' status
+                    for (let i = msgList.length - 1; i >= 0; i--) {
+                        const msg = msgList[i];
+                        if (msg.text === text && msg.sent && msg.status === 'sending') {
+                            msg.timestamp = result.timestamp;
+                            msg.status = 'sent';
+                            msg.id = `sent_${result.timestamp}`;
+                            break;
+                        }
+                    }
+                }
+                renderMessages(); // Re-render to update status
+                saveMessagesToStorage(activePeer.username); // Save to localStorage
+                // Trigger a message poll to get updated messages
+                setTimeout(() => {
+                    if (activePeer) {
+                        // Manually trigger one poll cycle
+                        const pollInterval = messagesPollInterval;
+                        if (pollInterval) {
+                            clearInterval(pollInterval);
+                            startMessagePolling();
+                        }
+                    }
+                }, 500);
+            } else {
+                console.error('Send failed:', result);
+                notifications.error('Не удалось отправить сообщение');
+            }
+        })
+        .catch(error => {
+            console.error('Send error:', error);
+            notifications.error('Ошибка при отправке сообщения');
         });
     }
 
@@ -749,3 +800,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 renderPeers();
+
+// Debug: Log when script initialization is complete
+console.log('SGram app.js initialization complete');
