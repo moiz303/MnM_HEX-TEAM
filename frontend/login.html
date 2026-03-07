@@ -94,6 +94,19 @@
     </div>
 
     <script>
+        // Auto-save username from server if already set
+        fetch('/api/auto_save_username')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.username !== 'user') {
+                    localStorage.setItem('messenger_username', data.username);
+                    document.getElementById('username').value = data.username;
+                }
+            })
+            .catch(error => {
+                console.log('Could not auto-fetch username');
+            });
+        
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             

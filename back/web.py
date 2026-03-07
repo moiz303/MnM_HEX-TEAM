@@ -4,7 +4,7 @@ import time
 import json
 import socket
 import uuid
-from flask import Flask, jsonify, request, send_from_directory, abort
+from flask import Flask, jsonify, request, send_from_directory, abort, redirect
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
@@ -278,6 +278,16 @@ def create_app():
         limit = int(request.args.get('limit', 50))
         res, code = call_handler('get_messages', {'peer': peer, 'limit': limit})
         return jsonify(res), code
+
+    @app.route('/api/auto_save_username', methods=['GET'])
+    def api_auto_save_username():
+        """Auto-save username from server to localStorage"""
+        username = globals().get('current_username', 'user')
+        return jsonify({
+            'success': True,
+            'username': username,
+            'auto_saved': True
+        })
 
     @app.route('/api/current_username', methods=['GET'])
     def api_current_username():

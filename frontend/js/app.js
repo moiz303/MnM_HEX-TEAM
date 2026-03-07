@@ -12,6 +12,12 @@ let messagesPollInterval = null;
 // Username management
 let currentUsername = localStorage.getItem('messenger_username') || 'user';
 
+// Check if user has name, if not - redirect to login
+if (!localStorage.getItem('messenger_username')) {
+    window.location.href = '/login';
+    throw new Error('Redirecting to login page');
+}
+
 const peersList = document.getElementById('peers-list');
 const messagesArea = document.getElementById('messages-area');
 const messageInput = document.getElementById('message-input');
