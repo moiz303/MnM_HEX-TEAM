@@ -1,120 +1,14 @@
-// Active peers (populated from backend /api/peers)
 let peers = [];
 let activePeer = null;
 let messages = {};
-let selectedFiles = []; // array of {file, uid}
+let selectedFiles = [];
 let messagesPollInterval = null;
-let transfersPollInterval = null;
-let activeTransfers = {}; // track transfer progress
-
-// Debug: Log when script loads
-console.log('SGram app.js loaded successfully');
-console.log('Current username from localStorage:', localStorage.getItem('messenger_username'));
-
-// Function to deselect current peer
-function deselectPeer() {
-    activePeer = null;
-    stopMessagePolling();
-    renderMessages();
-    renderPeers();
-    updateHeader();
-}
-
-// Function to stop message polling
-function stopMessagePolling() {
-    if (messagesPollInterval) {
-        clearInterval(messagesPollInterval);
-        messagesPollInterval = null;
-        console.log('Message polling stopped');
-    }
-}
-
-// Function to start message polling only if there's an active peer
-function startMessagePolling() {
-    stopMessagePolling(); // Clear any existing interval
-    
-    if (activePeer) {
-        messagesPollInterval = setInterval(async () => {
-            // Check if we still have an active peer, if not stop polling
-            if (!activePeer) {
-                stopMessagePolling();
-                return;
-            }
-            
-            try {
-                // Пробуем сначала по username, потом по IP
-                const url = new URL('/api/get_messages', window.location.origin);
-                url.searchParams.set('peer', activePeer.username);
-                const r = await fetch(url);
-                if (r.ok) {
-                    const data = await r.json();
-                    if (data.messages && data.messages.length > 0) {
-                        const mapped = data.messages.map(m => ({
-                            id: m.msg_id || m.id || Math.random().toString(36).substr(2, 9),
-                            from: m.from || 'unknown',
-                            text: m.text || '',
-                            time: m.time || new Date(m.timestamp * 1000).toISOString(),
-                            sent: m.from === currentUsername || m.from === 'me'
-                        }));
-                        
-                        const existing = messages[activePeer.username] || [];
-                        const existingIds = new Set(existing.map(x => x.id));
-                        const newMessages = mapped.filter(x => !existingIds.has(x.id));
-                        
-                        if (newMessages.length > 0) {
-                            const merged = existing.concat(newMessages);
-                            merged.sort((a, b) => a.time.localeCompare(b.time));
-                            messages[activePeer.username] = merged;
-                            renderMessages();
-                            saveMessagesToStorage(activePeer.username);
-                        }
-                    }
-                } else {
-                    // Если не получилось по username, пробуем по IP
-                    const url2 = new URL('/api/get_messages', window.location.origin);
-                    url2.searchParams.set('peer', activePeer.ip);
-                    const r2 = await fetch(url2);
-                    if (r2.ok) {
-                        const data = await r2.json();
-                        if (data.messages && data.messages.length > 0) {
-                            const mapped = data.messages.map(m => ({
-                                id: m.msg_id || m.id || Math.random().toString(36).substr(2, 9),
-                                from: m.from || 'unknown',
-                                text: m.text || '',
-                                time: m.time || new Date(m.timestamp * 1000).toISOString(),
-                                sent: m.from === currentUsername || m.from === 'me'
-                            }));
-                            
-                            const existing = messages[activePeer.username] || [];
-                            const existingIds = new Set(existing.map(x => x.id));
-                            const newMessages = mapped.filter(x => !existingIds.has(x.id));
-                            
-                            if (newMessages.length > 0) {
-                                const merged = existing.concat(newMessages);
-                                merged.sort((a, b) => a.time.localeCompare(b.time));
-                                messages[activePeer.username] = merged;
-                                renderMessages();
-                                saveMessagesToStorage(activePeer.username);
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to load messages:', e);
-            }
-        }, 2000); // Poll every 2 seconds to reduce server load
-    }
-}
-
-// Username management
 let currentUsername = localStorage.getItem('messenger_username') || 'user';
+let transfersPollInterval = null;
+let activeTransfers = {};
 
-// Check if user has name, if not - redirect to login
-// if (!localStorage.getItem('messenger_username')) {
-//     window.location.href = '/login';
-// }
+console.log('Current username from localStorage:', currentUsername);
 
-// Система уведомлений
 class NotificationSystem {
     constructor() {
         this.container = document.getElementById('notification-container');
@@ -123,46 +17,43 @@ class NotificationSystem {
     show(message, type = 'info', duration = 5000) {
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
-        
+
         const icon = this.getIcon(type);
         const content = document.createElement('div');
         content.className = 'notification-content';
         content.textContent = message;
-        
+
         const closeBtn = document.createElement('button');
         closeBtn.className = 'notification-close';
         closeBtn.innerHTML = '×';
         closeBtn.onclick = () => this.hide(notification);
-        
+
         notification.appendChild(icon);
         notification.appendChild(content);
         notification.appendChild(closeBtn);
-        
+
         this.container.appendChild(notification);
-        
-        // Автоматическое скрытие
+
         if (duration > 0) {
             setTimeout(() => this.hide(notification), duration);
         }
-        
+
         return notification;
     }
-    
+
     getIcon(type) {
         const icon = document.createElement('div');
         icon.className = 'notification-icon';
-        
         const icons = {
-            success: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-            error: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-            warning: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 9V13M12 17H12.01M5.07183 19H18.9282C19.5052 19 19.9282 18.577 19.9282 18V7.00001C19.9282 6.42301 19.5052 6.00001 18.9282 6.00001H5.07183C4.49483 6.00001 4.07183 6.42301 4.07183 7.00001V18C4.07183 18.577 4.49483 19 5.07183 19Z" stroke="currentColor" stroke-width="2"/></svg>',
-            info: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M13 16H12V12H11M12 8H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/></svg>'
+            success: '✓',
+            error: '✕',
+            warning: '⚠',
+            info: 'ℹ'
         };
-        
         icon.innerHTML = icons[type] || icons.info;
         return icon;
     }
-    
+
     hide(notification) {
         notification.classList.add('hide');
         setTimeout(() => {
@@ -171,25 +62,13 @@ class NotificationSystem {
             }
         }, 300);
     }
-    
-    success(message, duration) {
-        return this.show(message, 'success', duration);
-    }
-    
-    error(message, duration) {
-        return this.show(message, 'error', duration);
-    }
-    
-    warning(message, duration) {
-        return this.show(message, 'warning', duration);
-    }
-    
-    info(message, duration) {
-        return this.show(message, 'info', duration);
-    }
+
+    success(message, duration) { return this.show(message, 'success', duration); }
+    error(message, duration) { return this.show(message, 'error', duration); }
+    warning(message, duration) { return this.show(message, 'warning', duration); }
+    info(message, duration) { return this.show(message, 'info', duration); }
 }
 
-// Глобальная система уведомлений
 const notifications = new NotificationSystem();
 
 const peersList = document.getElementById('peers-list');
@@ -197,85 +76,23 @@ const messagesArea = document.getElementById('messages-area');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const searchInput = document.getElementById('search-input');
-const headerAvatar = document.getElementById('header-avatar');
 const headerName = document.getElementById('header-name');
 const headerStatus = document.getElementById('header-status');
-const voiceCallBtn = document.getElementById('voice-call-btn');
-
-// Function to change username
-function changeUsername() {
-    const newUsername = prompt('Введите новое имя пользователя:', currentUsername);
-    if (newUsername && newUsername.trim() && newUsername !== currentUsername) {
-        const username = newUsername.trim();
-        
-        if (username.length > 20) {
-            notifications.error('Имя слишком длинное (максимум 20 символов)');
-            return;
-        }
-        
-        if (!/^[A-Za-zА-Яа-я0-9_]+$/.test(username)) {
-            notifications.error('Имя может содержать только буквы, цифры и подчеркивания');
-            return;
-        }
-        
-        fetch('/api/set_username', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username })
-        })
-        .then(response => response.json())
-        .then(result => {
-            if (result.success) {
-                currentUsername = username;
-                localStorage.setItem('messenger_username', username);
-                notifications.success(`Имя изменено на: ${username}`);
-                
-                // Отправляем broadcast для обновления пиров
-                fetch('/api/refresh_peers', { method: 'POST' })
-                    .then(() => console.log('Broadcast sent after username change'))
-                    .catch(e => console.log('Failed to refresh peers:', e));
-                
-                // Обновляем интерфейс если нужно
-                updateHeader();
-            } else {
-                notifications.error(`Ошибка: ${result.error}`);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            notifications.error('Произошла ошибка. Попробуйте снова.');
-        });
-    }
-}
-
-// Add keyboard shortcut for username change (Ctrl+U)
-document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.key === 'u') {
-        e.preventDefault();
-        changeUsername();
-    }
-});
-
-const deleteChatBtn = document.getElementById('delete-chat-btn');
 const attachBtn = document.getElementById('attach-btn');
 const fileInput = document.getElementById('file-input');
 const filePreview = document.getElementById('file-preview');
+const messageInputWrapper = document.getElementById('message-input-wrapper');
+const currentUserName = document.getElementById('current-user-name');
 
 function getInitials(name) {
     if (!name) return '?';
-    
-    // Если это IP адрес, берем последние цифры
     if (name.includes('.')) {
         const parts = name.split('.');
         return parts[parts.length - 1];
     }
-    
-    // Если это имя, берем первые 2 буквы
     if (name.length <= 2) {
         return name.toUpperCase();
     }
-    
-    // Для длинных имен берем первую и последнюю буквы
     return name.charAt(0).toUpperCase() + name.charAt(name.length - 1).toUpperCase();
 }
 
@@ -287,7 +104,7 @@ function saveMessagesToStorage(username) {
     try {
         localStorage.setItem(`chat_${username}`, JSON.stringify(messages[username] || []));
     } catch (e) {
-        // ignore storage errors
+        console.error('Storage error:', e);
     }
 }
 
@@ -301,12 +118,110 @@ function loadMessagesFromStorage(username) {
     return null;
 }
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function deselectPeer() {
+    activePeer = null;
+    stopMessagePolling();
+    renderMessages();
+    renderPeers();
+    updateHeader();
+}
+
+function stopMessagePolling() {
+    if (messagesPollInterval) {
+        clearInterval(messagesPollInterval);
+        messagesPollInterval = null;
+        console.log('Message polling stopped');
+    }
+}
+
+function startMessagePolling() {
+    stopMessagePolling();
+
+    if (activePeer) {
+        messagesPollInterval = setInterval(async () => {
+            if (!activePeer) {
+                stopMessagePolling();
+                return;
+            }
+
+            try {
+                const url = new URL('/api/get_messages', window.location.origin);
+                url.searchParams.set('peer', activePeer.username);
+                const r = await fetch(url);
+
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data.messages && data.messages.length > 0) {
+                        const mapped = data.messages.map(m => ({
+                            id: m.msg_id || m.id || Math.random().toString(36).substr(2, 9),
+                            from: m.from || 'unknown',
+                            text: m.text || '',
+                            time: m.time || new Date(m.timestamp * 1000).toISOString(),
+                            sent: m.from === currentUsername || m.from === 'me'
+                        }));
+
+                        const existing = messages[activePeer.username] || [];
+                        const existingIds = new Set(existing.map(x => x.id));
+                        const newMessages = mapped.filter(x => !existingIds.has(x.id));
+
+                        if (newMessages.length > 0) {
+                            const merged = existing.concat(newMessages);
+                            merged.sort((a, b) => a.time.localeCompare(b.time));
+                            messages[activePeer.username] = merged;
+                            renderMessages();
+                            saveMessagesToStorage(activePeer.username);
+                        }
+                    }
+                } else {
+                    const url2 = new URL('/api/get_messages', window.location.origin);
+                    url2.searchParams.set('peer', activePeer.ip);
+                    const r2 = await fetch(url2);
+
+                    if (r2.ok) {
+                        const data = await r2.json();
+                        if (data.messages && data.messages.length > 0) {
+                            const mapped = data.messages.map(m => ({
+                                id: m.msg_id || m.id || Math.random().toString(36).substr(2, 9),
+                                from: m.from || 'unknown',
+                                text: m.text || '',
+                                time: m.time || new Date(m.timestamp * 1000).toISOString(),
+                                sent: m.from === currentUsername || m.from === 'me'
+                            }));
+
+                            const existing = messages[activePeer.username] || [];
+                            const existingIds = new Set(existing.map(x => x.id));
+                            const newMessages = mapped.filter(x => !existingIds.has(x.id));
+
+                            if (newMessages.length > 0) {
+                                const merged = existing.concat(newMessages);
+                                merged.sort((a, b) => a.time.localeCompare(b.time));
+                                messages[activePeer.username] = merged;
+                                renderMessages();
+                                saveMessagesToStorage(activePeer.username);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load messages:', e);
+            }
+        }, 2000);
+    }
+}
+
 async function fetchPeersPolling() {
     try {
         const res = await fetch('/api/peers');
         if (!res.ok) throw new Error('fetch failed');
+
         const data = await res.json();
-        // Map backend peers to UI shape
+
         peers = (data.peers || []).map((p, idx) => ({
             id: p.username || p.ip || idx,
             username: p.username || p.ip,
@@ -317,7 +232,13 @@ async function fetchPeersPolling() {
         }));
     } catch (err) {
         console.warn('Failed to fetch peers:', err);
-        peers = [];
+
+        if (peers.length === 0) {
+            peers = [
+                { id: 'test1', username: 'User1', ip: '192.168.1.10', ping: 15, online: true, has_chat: false },
+                { id: 'test2', username: 'User2', ip: '192.168.1.11', ping: 23, online: false, has_chat: false }
+            ];
+        }
     }
 
     renderPeers(searchInput.value);
@@ -331,7 +252,6 @@ async function fetchPeersPolling() {
     }
 }
 
-// Poll transfers every 2 seconds
 function startTransfersPolling() {
     if (transfersPollInterval) clearInterval(transfersPollInterval);
     transfersPollInterval = setInterval(async () => {
@@ -339,15 +259,13 @@ function startTransfersPolling() {
             const res = await fetch('/api/transfers');
             if (!res.ok) return;
             const data = await res.json();
-            
-            // Update active transfers with latest status
+
             data.transfers.forEach(transfer => {
                 const existing = activeTransfers[transfer.transfer_id];
                 if (!existing || existing.status !== transfer.status || existing.progress !== transfer.progress) {
                     activeTransfers[transfer.transfer_id] = transfer;
                     updateTransferUI(transfer);
-                    
-                    // Show completion notification
+
                     if (transfer.status === 'completed' && (!existing || existing.status !== 'completed')) {
                         showTransferNotification(transfer, 'completed');
                     } else if (transfer.status === 'failed' && (!existing || existing.status !== 'failed')) {
@@ -355,8 +273,7 @@ function startTransfersPolling() {
                     }
                 }
             });
-            
-            // Clean up completed/failed transfers after 10 seconds
+
             Object.keys(activeTransfers).forEach(id => {
                 const transfer = activeTransfers[id];
                 if ((transfer.status === 'completed' || transfer.status === 'failed') && 
@@ -371,7 +288,7 @@ function startTransfersPolling() {
 }
 
 function updateTransferUI(transfer) {
-    // Update progress bars in file preview
+
     const bar = document.querySelector(`.file-item[data-transfer-id="${transfer.transfer_id}"] .file-progress-bar`);
     if (bar) {
         bar.style.width = `${Math.round(transfer.progress || 0)}%`;
@@ -381,8 +298,7 @@ function updateTransferUI(transfer) {
             bar.style.background = 'linear-gradient(90deg, #f44336, #f44336)';
         }
     }
-    
-    // Update file preview items with transfer status
+
     const item = document.querySelector(`.file-item[data-transfer-id="${transfer.transfer_id}"]`);
     if (item) {
         item.dataset.status = transfer.status;
@@ -408,8 +324,7 @@ function showTransferNotification(transfer, type) {
     const message = type === 'completed' 
         ? `📁 Файл "${transfer.filename}" успешно передан`
         : `❌ Передача файла "${transfer.filename}" не удалась: ${transfer.error || 'Неизвестная ошибка'}`;
-    
-    // Add as system message to current chat if available
+
     if (activePeer && messages[activePeer.username]) {
         messages[activePeer.username].push({
             text: message,
@@ -421,544 +336,507 @@ function showTransferNotification(transfer, type) {
     }
 }
 
-// Start transfer polling when page loads
 startTransfersPolling();
 
-// Poll peers every 3s
 fetchPeersPolling();
 setInterval(fetchPeersPolling, 1000);
 
-function renderPeers(filter = '') {
-    const filtered = peers.filter(p => (p.username || '').toLowerCase().includes(filter.toLowerCase()));
+function selectPeer(peerId) {
+    const peer = peers.find(p => p.id === peerId);
+    if (!peer) return;
 
-    // Добавляем класс обновления для плавного перехода
+    activePeer = peer;
+
+    const cached = loadMessagesFromStorage(peer.username);
+    if (cached) {
+        messages[peer.username] = cached;
+    } else {
+        messages[peer.username] = messages[peer.username] || [];
+    }
+
+    if (!peer.has_chat) {
+        fetch('/api/start_chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ peer: peer.username })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                console.log('Chat started with', peer.username);
+                peer.has_chat = true;
+            }
+        })
+        .catch(err => console.error('Failed to start chat:', err));
+    }
+
+    renderMessages();
+    renderPeers();
+    updateHeader();
+    startMessagePolling();
+}
+
+function renderPeers(filter = '') {
+    const filtered = peers.filter(p => 
+        (p.username || '').toLowerCase().includes(filter.toLowerCase())
+    );
+
     peersList.classList.add('updating');
-    
-    // Используем requestAnimationFrame для плавного рендеринга
+
     requestAnimationFrame(() => {
         const newHTML = filtered.map(peer => `
-            <div class="peer-item ${activePeer?.id === peer.id ? 'active' : ''}" data-peer-username="${peer.username}">
-                <div class="avatar">
-                    <span>${getInitials(peer.username)}</span>
-                    <div class="status-indicator ${peer.online ? 'online' : 'offline'}"></div>
+            <div class="peer-item ${activePeer && activePeer.id === peer.id ? 'active' : ''}" 
+                 data-peer-id="${peer.id}">
+                <div class="avatar" style="background: var(--color-bg-${(peer.username.charCodeAt(0) % 8) + 1});">
+                    ${getInitials(peer.username)}
                 </div>
                 <div class="peer-info">
-                    <h4>${peer.username}</h4>
+                    <div class="peer-name">${peer.username}</div>
                     <div class="peer-meta">
                         <span class="peer-ping">
                             <span class="ping-dot ${peer.online ? 'online' : 'offline'}"></span>
                             ${peer.ping}ms
                         </span>
-                        <span class="peer-status">${peer.online ? 'В сети' : 'Не в сети'}</span>
                     </div>
                 </div>
             </div>
         `).join('');
-        
-        // Проверяем, изменился ли HTML перед обновлением
+
         if (peersList.innerHTML !== newHTML) {
             peersList.innerHTML = newHTML;
-            
-            // Добавляем обработчики событий только для новых элементов
-            document.querySelectorAll('.peer-item').forEach(item => {
-                if (!item.hasAttribute('data-listener')) {
-                    item.addEventListener('click', () => {
-                        const username = item.dataset.peerUsername;
-                        const peer = peers.find(p => p.username === username);
-                        if (peer) selectPeerByUsername(peer.username);
-                    });
-                    item.setAttribute('data-listener', 'true');
-                }
-            });
         }
-        
-        // Убираем класс обновления после рендеринга
-        setTimeout(() => {
-            peersList.classList.remove('updating');
-        }, 100);
+
+        peersList.classList.remove('updating');
+
+        document.querySelectorAll('.peer-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const peerId = item.dataset.peerId;
+                selectPeer(peerId);
+            });
+        });
     });
-}
-
-async function selectPeerByUsername(username) {
-    activePeer = peers.find(p => p.username === username);
-    if (!activePeer) return;
-
-    // ensure messages bucket
-    if (!messages[activePeer.username]) messages[activePeer.username] = [];
-
-    // try to load local cached messages first so UI works frontend-only
-    const local = loadMessagesFromStorage(activePeer.username);
-    if (local && Array.isArray(local) && local.length > 0) {
-        messages[activePeer.username] = local;
-        renderMessages();
-    }
-
-    renderPeers(searchInput.value);
-    updateHeader();
-
-    // If no active chat, try to initiate handshake
-    if (!activePeer.has_chat) {
-        try {
-            // Используем IP вместо username для начала чата
-            const res = await fetch('/api/start_chat', {
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    username: activePeer.username,
-                    ip: activePeer.ip 
-                })
-            });
-            if (res.ok) {
-                activePeer.has_chat = true;
-            }
-        } catch (e) {
-            console.error('Failed to start chat:', e);
-        }
-    }
-
-    // Load message history from backend
-    try {
-        const url = new URL('/api/get_messages', window.location.origin);
-        url.searchParams.set('peer', activePeer.username);
-        const r = await fetch(url);
-        if (r.ok) {
-            const data = await r.json();
-            // map messages to simple structure
-            const mapped = (data.messages || []).map(m => ({
-                text: m.text || '',
-                from: m.from || activePeer.username,
-                time: new Date(m.timestamp * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
-                sent: m.from === 'me'
-            }));
-            // If backend provides only encrypted placeholders, keep local cache.
-            const hasReal = mapped.some(x => x.text && x.text !== '[encrypted]');
-            if (hasReal) {
-                messages[activePeer.username] = mapped.reverse();
-            }
-        }
-    } catch (e) {
-        // fallback: keep existing messages
-    }
-
-    renderMessages();
-    messagesArea.querySelector('.empty-state')?.remove();
-
-    // start polling messages for this peer
-    startMessagePolling();
-}
-
-function updateHeader() {
-    if (!activePeer) {
-        headerAvatar.innerHTML = '<span>?</span>';
-        headerName.textContent = 'Выберите собеседника';
-        headerStatus.textContent = '';
-        return;
-    }
-
-    headerAvatar.innerHTML = `
-        <span>${getInitials(activePeer.username)}</span>
-        <div class="status-indicator ${activePeer.online ? 'online' : 'offline'}"></div>
-    `;
-    headerName.textContent = activePeer.username;
-    headerStatus.textContent = `${activePeer.ping}ms`;
 }
 
 function renderMessages() {
     if (!activePeer) {
-        messagesArea.innerHTML = '<div class="empty-state">Выберите собеседника для начала чата</div>';
-        return;
-    }
-    
-    if (!messages[activePeer.username] || messages[activePeer.username].length === 0) {
-        messagesArea.innerHTML = '<div class="empty-state">Нет сообщений. Начните диалог!</div>';
+        messagesArea.innerHTML = `
+            <div class="empty-state">
+                <svg width="100" height="100" viewBox="0 0 100 100" fill="currentColor">
+                    <path d="M50 10c-22.1 0-40 17.9-40 40s17.9 40 40 40 40-17.9 40-40-17.9-40-40-40zm0 75c-19.3 0-35-15.7-35-35s15.7-35 35-35 35 15.7 35 35-15.7 35-35 35z"/>
+                    <circle cx="37" cy="42" r="4"/>
+                    <circle cx="63" cy="42" r="4"/>
+                    <path d="M50 70c-8.8 0-16-7.2-16-16h5c0 6.1 4.9 11 11 11s11-4.9 11-11h5c0 8.8-7.2 16-16 16z"/>
+                </svg>
+                <p>Выберите контакт для начала общения</p>
+            </div>
+        `;
         return;
     }
 
-    const msgs = messages[activePeer.username];
-    
-    // Добавляем класс обновления для плавного перехода
+    const msgs = messages[activePeer.username] || [];
+
+    if (msgs.length === 0) {
+        messagesArea.innerHTML = `
+            <div class="empty-state">
+                <svg width="100" height="100" viewBox="0 0 100 100" fill="currentColor">
+                    <path d="M50 20c-16.5 0-30 13.5-30 30s13.5 30 30 30 30-13.5 30-30-13.5-30-30-30zm0 55c-13.8 0-25-11.2-25-25s11.2-25 25-25 25 11.2 25 25-11.2 25-25 25z"/>
+                    <path d="M35 45h30v5H35z"/>
+                </svg>
+                <p>Нет сообщений. Начните диалог!</p>
+            </div>
+        `;
+        return;
+    }
+
     messagesArea.classList.add('updating');
 
-    // Используем requestAnimationFrame для плавного рендеринга
     requestAnimationFrame(() => {
-        const newHTML = msgs.map(msg => `
-            <div class="message ${msg.system ? 'system' : (msg.sent ? 'sent' : 'received')}">
-                ${!msg.sent && !msg.system ? `
-                    <div class="message-avatar">
-                        <span>${getInitials(msg.from)}</span>
-                    </div>
-                ` : ''}
-                <div class="message-content">
-                    <div class="message-bubble">${(() => {
-                        const text = msg.text || '';
-                        // find first URL-like token
-                        const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+|\/downloads\/\S+)/);
-                        if (m) {
-                            const url = m[0];
-                            if (isImageUrl(url)) {
-                                return `<img src="${url}" class="msg-image" />`;
-                            }
-                            // fallback: show link and remaining text
-                            const rest = text.replace(url, '').trim();
-                            return `<a href="${url}" target="_blank">${url}</a>${rest ? ' ' + rest : ''}`;
-                        }
-                        // no url -> plain text (escape minimal)
-                        return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    })()}</div>
-                    <span class="message-time">${msg.time}${msg.status === 'sending' ? ' (отправка...)' : ''}</span>
-                </div>
-                ${msg.sent ? `
-                    <div class="message-avatar">
-                        <span>Я</span>
-                    </div>
-                ` : ''}
-            </div>
-        `).join('');
+        const newHTML = msgs.map(msg => {
+            const from = msg.sent ? currentUsername : (msg.from || activePeer.username);
 
-        // Проверяем, изменился ли HTML перед обновлением
+            const timeStr = (() => {
+                try {
+                    return new Date(msg.time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                } catch {
+                    return msg.time || '';
+                }
+            })();
+
+            const bubbleContent = (() => {
+                const text = msg.text || '';
+                const urlMatch = text.match(/(https?:\/\/\S+|\/uploads\/\S+|\/downloads\/\S+)/);
+                if (urlMatch) {
+                    const url = urlMatch[0];
+                    if (isImageUrl(url)) {
+                        return `<img src="${url}" class="msg-image"
+                                     onclick="window.open('${url}','_blank')"
+                                     onerror="this.style.display='none'">`;
+                    }
+                    const rest = text.replace(url, '').trim();
+                    const filename = url.split('/').pop();
+                    return `<a href="${url}" target="_blank">📎 ${filename}</a>${rest ? ' ' + escapeHtml(rest) : ''}`;
+                }
+                return escapeHtml(text);
+            })();
+
+            return `
+                <div class="message ${msg.system ? 'system' : (msg.sent ? 'sent' : 'received')}">
+                    ${!msg.sent && !msg.system ? `
+                        <div class="message-avatar"><span>${getInitials(from)}</span></div>
+                    ` : ''}
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            ${bubbleContent}
+                            <span class="message-time">
+                                ${timeStr}${msg.status === 'sending' ? ' (отправка...)' : ''}
+                            </span>
+                        </div>
+                    </div>
+                    ${msg.sent && !msg.system ? `
+                        <div class="message-avatar"><span>${getInitials(from)}</span></div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+
         if (messagesArea.innerHTML !== newHTML) {
             messagesArea.innerHTML = newHTML;
-            
-            // Плавная прокрутка к новому сообщению
-            const messagesContainer = messagesArea;
-            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
-                messagesContainer.scrollTo({
-                    top: messagesContainer.scrollHeight,
-                    behavior: 'smooth'
-                });
-            }
+            messagesArea.scrollTo({ top: messagesArea.scrollHeight, behavior: 'smooth' });
         }
-        
-        // Убираем класс обновления после рендеринга
-        setTimeout(() => {
-            messagesArea.classList.remove('updating');
-        }, 100);
+
+        setTimeout(() => messagesArea.classList.remove('updating'), 100);
     });
 }
 
-function sendMessage() {
+function updateHeader() {
+    if (currentUserName) {
+        currentUserName.textContent = currentUsername;
+    }
+
+    if (activePeer) {
+        messageInputWrapper.style.display = 'flex';
+        headerName.textContent = activePeer.username;
+        headerStatus.textContent = activePeer.online ? 'Онлайн' : 'Офлайн';
+    } else {
+        messageInputWrapper.style.display = 'none';
+        headerName.textContent = 'Выберите чат';
+        headerStatus.textContent = 'Выберите контакт для начала общения';
+    }
+}
+
+async function sendMessage() {
     if (!activePeer || (!messageInput.value.trim() && selectedFiles.length === 0)) return;
 
     const text = messageInput.value.trim();
     const now = new Date();
     const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // locally append
     if (text) {
-        if (!messages[activePeer.username]) messages[activePeer.username] = [];
-        messages[activePeer.username].push({ 
-            text, 
-            time, 
-            sent: true, 
-            from: 'me',
-            id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        messages[activePeer.username] = messages[activePeer.username] || [];
+        messages[activePeer.username].push({
+            id: localId,
+            text,
+            time,
+            sent: true,
+            from: currentUsername,
             status: 'sending'
         });
+        messageInput.value = '';
+        renderMessages();
     }
 
     if (selectedFiles.length > 0) {
-        // append placeholders to message list
+        messages[activePeer.username] = messages[activePeer.username] || [];
         selectedFiles.forEach(item => {
-            messages[activePeer.username].push({ text: `📎 ${item.file.name}`, time, sent: true, from: 'me' });
+            messages[activePeer.username].push({
+                text: `📎 ${item.file.name}`,
+                time,
+                sent: true,
+                from: currentUsername
+            });
         });
-        // do not clear preview yet — we'll upload and then clear
+        renderMessages();
     }
 
-    messageInput.value = '';
-    renderMessages();
-
-    // Send to backend
     if (text) {
-        console.log('[DEBUG] Sending message:', { peer: activePeer.username, text });
-        fetch('/api/send_message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ peer: activePeer.username, text })
-        })
-        .then(response => {
-            console.log('[DEBUG] Send response status:', response.status);
-            return response.json();
-        })
-        .then(result => {
-            console.log('[DEBUG] Send response result:', result);
-            if (result.status === 'sent') {
-                console.log('Message sent successfully:', result);
-                // Update the last message with sent status and timestamp
+        try {
+            const response = await fetch('/api/send_message', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ peer: activePeer.username, text })
+            });
+
+            const result = await response.json();
+
+            const ok = result.success || result.status === 'sent';
+
+            if (ok) {
                 const msgList = messages[activePeer.username];
-                console.log('[DEBUG] Current messages list:', msgList);
-                if (msgList && msgList.length > 0) {
-                    // Find the most recent message with 'sending' status
+                if (msgList) {
                     for (let i = msgList.length - 1; i >= 0; i--) {
                         const msg = msgList[i];
-                        if (msg.text === text && msg.sent && msg.status === 'sending') {
-                            console.log('[DEBUG] Found message to update:', msg);
-                            msg.timestamp = result.timestamp;
+                        if (msg.id === localId || (msg.text === text && msg.status === 'sending')) {
+                            msg.id = result.msg_id || result.timestamp
+                                ? `sent_${result.msg_id || result.timestamp}`
+                                : msg.id;
                             msg.status = 'sent';
-                            msg.id = `sent_${result.timestamp}`;
                             break;
                         }
                     }
                 }
-                console.log('[DEBUG] Messages after update:', messages[activePeer.username]);
-                renderMessages(); // Re-render to update status
-                saveMessagesToStorage(activePeer.username); // Save to localStorage
-                // Trigger a message poll to get updated messages
+                saveMessagesToStorage(activePeer.username);
+                renderMessages();
+
                 setTimeout(() => {
-                    if (activePeer) {
-                        // Manually trigger one poll cycle
-                        const pollInterval = messagesPollInterval;
-                        if (pollInterval) {
-                            clearInterval(pollInterval);
-                            startMessagePolling();
-                        }
+                    if (activePeer && messagesPollInterval) {
+                        clearInterval(messagesPollInterval);
+                        startMessagePolling();
                     }
                 }, 500);
             } else {
-                console.error('Send failed:', result);
-                notifications.error('Не удалось отправить сообщение');
+                notifications.error(`Ошибка отправки: ${result.error || 'неизвестная ошибка'}`);
+            }
+        } catch (err) {
+            console.error('Send error:', err);
+            notifications.error('Ошибка при отправке сообщения');
+        }
+    }
+
+    if (selectedFiles.length > 0) {
+        const filesToUpload = selectedFiles.slice();
+
+        for (const { file, uid } of filesToUpload) {
+            try {
+                const res = await uploadFileInChunks(file, activePeer.username, (p) => {
+                    const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
+                    if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+                });
+
+                if (res?.upload_id) {
+                    try {
+                        const sendRes = await fetch('/api/send_uploaded_file', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
+                        });
+
+                        if (sendRes.ok) {
+                            const sendData = await sendRes.json();
+
+                            if (sendData.transfer_id) {
+                                activeTransfers[sendData.transfer_id] = {
+                                    transfer_id: sendData.transfer_id,
+                                    filename: file.name,
+                                    status: 'pending',
+                                    progress: 0,
+                                    direction: 'upload'
+                                };
+                                const fileItem = document.querySelector(`.file-item[data-uid="${uid}"]`);
+                                if (fileItem) {
+                                    fileItem.dataset.transferId = sendData.transfer_id;
+                                    const statusDiv = document.createElement('div');
+                                    statusDiv.className = 'file-status';
+                                    statusDiv.textContent = 'Ожидание...';
+                                    fileItem.appendChild(statusDiv);
+                                }
+                            } else if (res.file_url) {
+                                await fetch('/api/send_message', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        peer: activePeer.username,
+                                        text: `📎 ${file.name} ${res.file_url}`
+                                    })
+                                }).catch(() => {});
+                            }
+                        } else {
+                            throw new Error('P2P send failed');
+                        }
+                    } catch (err) {
+                        console.warn('P2P fallback to link:', err);
+                        if (res.file_url) {
+                            await fetch('/api/send_message', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    peer: activePeer.username,
+                                    text: `📎 ${file.name} ${res.file_url}`
+                                })
+                            }).catch(() => {});
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Upload failed:', err);
+                const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
+                if (bar) bar.style.background = 'linear-gradient(90deg, var(--color-error), var(--color-error))';
+            }
+        }
+
+        selectedFiles = [];
+        renderFilePreview();
+    }
+}
+
+async function uploadFile(file, uid) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('peer', activePeer.username);
+
+    const progressBar = document.querySelector(`[data-file-uid="${uid}"] .file-progress-bar`);
+
+    try {
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable && progressBar) {
+                const pct = (e.loaded / e.total) * 100;
+                progressBar.style.width = pct + '%';
+            }
+        });
+
+        xhr.addEventListener('load', () => {
+            if (xhr.status === 200) {
+                try {
+                    const result = JSON.parse(xhr.responseText);
+                    if (result.success) {
+                        notifications.success(`Файл "${file.name}" отправлен`);
+                    } else {
+                        notifications.error(`Ошибка: ${result.error}`);
+                    }
+                } catch (e) {
+                    notifications.error('Ошибка парсинга ответа');
+                }
+            } else {
+                notifications.error('Ошибка загрузки файла');
+            }
+        });
+
+        xhr.addEventListener('error', () => {
+            notifications.error(`Не удалось загрузить "${file.name}"`);
+        });
+
+        xhr.open('POST', '/api/send_file');
+        xhr.send(formData);
+    } catch (err) {
+        console.error('Upload error:', err);
+        notifications.error(`Ошибка загрузки "${file.name}"`);
+    }
+}
+
+function renderFilePreview() {
+    if (selectedFiles.length === 0) {
+        filePreview.classList.add('hidden');
+        filePreview.innerHTML = '';
+        return;
+    }
+
+    filePreview.classList.remove('hidden');
+
+    const html = selectedFiles.map(({file, uid}) => `
+        <div class="file-item" data-file-uid="${uid}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                <polyline points="13 2 13 9 20 9"></polyline>
+            </svg>
+            <span>${file.name}</span>
+            <div class="file-progress">
+                <div class="file-progress-bar"></div>
+            </div>
+            <button class="file-remove" data-file-uid="${uid}">×</button>
+        </div>
+    `).join('');
+
+    filePreview.innerHTML = html;
+
+    document.querySelectorAll('.file-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const uid = btn.dataset.fileUid;
+            selectedFiles = selectedFiles.filter(f => f.uid !== uid);
+            renderFilePreview();
+        });
+    });
+}
+
+function changeUsername() {
+    const newUsername = prompt('Введите новое имя пользователя:', currentUsername);
+
+    if (newUsername && newUsername.trim() && newUsername !== currentUsername) {
+        const username = newUsername.trim();
+
+        if (username.length > 20) {
+            notifications.error('Имя слишком длинное (максимум 20 символов)');
+            return;
+        }
+
+        if (!/^[A-Za-zА-Яа-я0-9_]+$/.test(username)) {
+            notifications.error('Имя может содержать только буквы, цифры и подчеркивания');
+            return;
+        }
+
+        fetch('/api/set_username', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                currentUsername = username;
+                localStorage.setItem('messenger_username', username);
+                notifications.success(`Имя изменено на: ${username}`);
+
+                fetch('/api/refresh_peers', { method: 'POST' })
+                    .then(() => console.log('Broadcast sent after username change'))
+                    .catch(e => console.log('Failed to refresh peers:', e));
+
+                updateHeader();
+            } else {
+                notifications.error(`Ошибка: ${result.error}`);
             }
         })
         .catch(error => {
-            console.error('Send error:', error);
-            notifications.error('Ошибка при отправке сообщения');
+            console.error('Error:', error);
+            notifications.error('Произошла ошибка. Попробуйте снова.');
         });
     }
-
-    // If there are files, upload them in chunks and send link
-    if (selectedFiles.length > 0) {
-        (async () => {
-            for (const item of selectedFiles.slice()) {
-                const file = item.file;
-                const uid = item.uid;
-                try {
-                    const res = await uploadFileInChunks(file, activePeer.username, (p) => {
-                        // update progress bar in UI
-                        const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
-                        if (bar) bar.style.width = `${Math.round(p * 100)}%`;
-                    });
-
-                    if (res && res.upload_id) {
-                        // try P2P send
-                        try {
-                            const sendRes = await fetch('/api/send_uploaded_file', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
-                            });
-                            if (sendRes.ok) {
-                                const sendData = await sendRes.json();
-                                if (sendData.transfer_id) {
-                                    // Track this transfer
-                                    activeTransfers[sendData.transfer_id] = {
-                                        transfer_id: sendData.transfer_id,
-                                        filename: file.name,
-                                        status: 'pending',
-                                        progress: 0,
-                                        direction: 'upload'
-                                    };
-                                    
-                                    // Update UI to show transfer tracking
-                                    const fileItem = document.querySelector(`.file-item[data-uid="${uid}"]`);
-                                    if (fileItem) {
-                                        fileItem.dataset.transferId = sendData.transfer_id;
-                                        const statusDiv = document.createElement('div');
-                                        statusDiv.className = 'file-status';
-                                        statusDiv.textContent = 'Ожидание...';
-                                        fileItem.appendChild(statusDiv);
-                                    }
-                                } else {
-                                    // No transfer_id but response was OK - send as link
-                                    if (res.file_url) {
-                                        const fileMsg = `📎 ${file.name} ${res.file_url}`;
-                                        fetch('/api/send_message', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
-                                        }).catch(() => {});
-                                    }
-                                }
-                            } else {
-                                console.warn('P2P send failed, falling back to link');
-                                // fallback to sending link stored in res.file_url
-                                if (res.file_url) {
-                                    const fileMsg = `📎 ${file.name} ${res.file_url}`;
-                                    fetch('/api/send_message', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
-                                    }).catch(() => {});
-                                }
-                            }
-                        } catch (err) {
-                            console.error('Send file failed', err);
-                            // fallback to sending link stored in res.file_url
-                            if (res.file_url) {
-                                const fileMsg = `📎 ${file.name} ${res.file_url}`;
-                                fetch('/api/send_message', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
-                                }).catch(() => {});
-                            }
-                        }
-                    }
-                } catch (err) {
-                    console.error('Upload failed', err);
-                    const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
-                    if (bar) bar.style.background = 'linear-gradient(90deg, var(--color-error), var(--color-error))';
-                }
-            }
-
-            // after all uploads, clear selection and hide preview
-            selectedFiles = [];
-            filePreview.classList.add('hidden');
-            filePreview.innerHTML = '';
-        })();
-    }
-}
-
-function deleteChat() {
-    if (!activePeer) return;
-    
-    if (confirm(`Удалить чат с ${activePeer.username}?`)) {
-        messages[activePeer.username] = [];
-        activePeer = null;
-        stopMessagePolling(); // Stop polling when chat is deleted
-        renderMessages();
-        renderPeers(); // Update peers list to remove active state
-        updateHeader(); // Clear header
-    }
-}
-
-attachBtn.addEventListener('click', () => {
-    fileInput.click();
-});
-
-fileInput.addEventListener('change', (e) => {
-    const files = Array.from(e.target.files).map(f => ({ file: f, uid: `${Date.now()}_${Math.floor(Math.random()*1000000)}` }));
-    selectedFiles = [...selectedFiles, ...files];
-
-    if (selectedFiles.length > 0) {
-        filePreview.classList.remove('hidden');
-        filePreview.innerHTML = selectedFiles.map((item) => `
-            <div class="file-item" data-uid="${item.uid}">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <path d="M13 2H6C5.46957 2 4.96086 2.21071 4.58579 2.58579C4.21071 2.96086 4 3.46957 4 4V20C4 20.5304 4.21071 21.0391 4.58579 21.4142C4.96086 21.7893 5.46957 22 6 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V9L13 2Z" stroke="currentColor" stroke-width="2"/>
-                    <path d="M13 2V9H20" stroke="currentColor" stroke-width="2"/>
-                </svg>
-                <span>${item.file.name}</span>
-                <div class="file-progress"><div class="file-progress-bar" style="width:0%"></div></div>
-                <button class="file-remove" data-uid="${item.uid}">✕</button>
-            </div>
-        `).join('');
-
-        // remove handlers
-        document.querySelectorAll('.file-remove').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const uid = btn.dataset.uid;
-                const idx = selectedFiles.findIndex(s => s.uid === uid);
-                if (idx !== -1) selectedFiles.splice(idx, 1);
-
-                if (selectedFiles.length === 0) {
-                    filePreview.classList.add('hidden');
-                    filePreview.innerHTML = '';
-                } else {
-                    // re-render
-                    fileInput.dispatchEvent(new Event('change'));
-                }
-            });
-        });
-    }
-
-    fileInput.value = '';
-});
-
-/**
- * Upload a file in chunks to the backend.
- * Calls /api/upload/init -> /api/upload/chunk -> /api/upload/complete
- * Returns {file_url, filename} on success.
- */
-async function uploadFileInChunks(file, peerUsername, onProgress) {
-    const MAX_SIZE = 200 * 1024 * 1024; // 200MB
-    if (file.size > MAX_SIZE) throw new Error('File exceeds 200MB limit');
-
-    // Init upload
-    const initRes = await fetch('/api/upload/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, size: file.size })
-    });
-    if (!initRes.ok) throw new Error('Failed to init upload');
-    const initData = await initRes.json();
-    const uploadId = initData.upload_id;
-
-    const CHUNK_SIZE = 512 * 1024; // 512 KB
-    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-    for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const blob = file.slice(start, end);
-
-        const form = new FormData();
-        form.append('upload_id', uploadId);
-        form.append('index', String(i));
-        form.append('chunk', blob, file.name);
-
-        const chunkRes = await fetch('/api/upload/chunk', {
-            method: 'POST',
-            body: form
-        });
-        if (!chunkRes.ok) throw new Error('Chunk upload failed');
-
-        if (onProgress) onProgress((i + 1) / totalChunks);
-    }
-
-    // Complete
-    const completeRes = await fetch('/api/upload/complete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_id: uploadId })
-    });
-    if (!completeRes.ok) throw new Error('Upload complete failed');
-    const completeData = await completeRes.json();
-    return completeData;
 }
 
 sendBtn.addEventListener('click', sendMessage);
+
 messageInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
     }
 });
+
 searchInput.addEventListener('input', (e) => {
     renderPeers(e.target.value);
 });
-deleteChatBtn.addEventListener('click', deleteChat);
+
 attachBtn.addEventListener('click', () => {
     fileInput.click();
 });
 
-// Cleanup polling when page is unloaded
-window.addEventListener('beforeunload', () => {
-    stopMessagePolling();
+fileInput.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files);
+    files.forEach(file => {
+        const uid = Math.random().toString(36).substr(2, 9);
+        selectedFiles.push({ file, uid });
+    });
+    renderFilePreview();
+    fileInput.value = '';
 });
 
-// Cleanup polling when visibility changes (user switches tabs)
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        // Page is hidden, reduce polling frequency or stop
-        stopMessagePolling();
-    } else {
-        // Page is visible again, restart polling if we have an active peer
-        if (activePeer) {
-            startMessagePolling();
-        }
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'u') {
+        e.preventDefault();
+        changeUsername();
     }
 });
 
+updateHeader();
 renderPeers();
-
-// Debug: Log when script initialization is complete
-console.log('SGram app.js initialization complete');
+renderMessages();
