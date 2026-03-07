@@ -1,12 +1,8 @@
 // Active peers (populated from backend /api/peers)
 let peers = [];
-
 let activePeer = null;
 let messages = {};
 let selectedFiles = []; // array of {file, uid}
-let callTimer = null;
-let callSeconds = 0;
-let localStream = null;
 let messagesPollInterval = null;
 
 // Username management
@@ -153,26 +149,28 @@ document.addEventListener('keydown', (e) => {
         changeUsername();
     }
 });
-const videoCallBtn = document.getElementById('video-call-btn');
+
 const deleteChatBtn = document.getElementById('delete-chat-btn');
-const callModal = document.getElementById('call-modal');
-const callAvatarText = document.getElementById('call-avatar-text');
-const callName = document.getElementById('call-name');
-const callStatus = document.getElementById('call-status');
-const declineCallBtn = document.getElementById('decline-call-btn');
-const callContent = document.getElementById('call-content');
-const videoCallWrapper = document.getElementById('video-call-wrapper');
-const videoTimer = document.getElementById('video-timer');
-const videoEndBtn = document.getElementById('video-end-btn');
-const localVideo = document.getElementById('local-video');
-const remoteVideo = document.getElementById('remote-video');
 const attachBtn = document.getElementById('attach-btn');
 const fileInput = document.getElementById('file-input');
 const filePreview = document.getElementById('file-preview');
 
-function getInitials(ip) {
-    const parts = ip.split('.');
-    return parts[parts.length - 1];
+function getInitials(name) {
+    if (!name) return '?';
+    
+    // Если это IP адрес, берем последние цифры
+    if (name.includes('.')) {
+        const parts = name.split('.');
+        return parts[parts.length - 1];
+    }
+    
+    // Если это имя, берем первые 2 буквы
+    if (name.length <= 2) {
+        return name.toUpperCase();
+    }
+    
+    // Для длинных имен берем первую и последнюю буквы
+    return name.charAt(0).toUpperCase() + name.charAt(name.length - 1).toUpperCase();
 }
 
 function isImageUrl(url) {
@@ -227,36 +225,58 @@ async function fetchPeersPolling() {
     }
 }
 
-// Poll peers every 3s
+// Poll peers every 1s
 fetchPeersPolling();
-setInterval(fetchPeersPolling, 3000);
+setInterval(fetchPeersPolling, 1000);
 
 function renderPeers(filter = '') {
-    const filtered = peers.filter(p => (p.ip || p.username || '').includes(filter));
+    const filtered = peers.filter(p => (p.username || '').toLowerCase().includes(filter.toLowerCase()));
 
-    peersList.innerHTML = filtered.map(peer => `
-        <div class="peer-item ${activePeer?.id === peer.id ? 'active' : ''}" data-peer-username="${peer.username}">
-            <div class="avatar">
-                <span>${getInitials(peer.ip)}</span>
-                <div class="status-indicator ${peer.online ? 'online' : 'offline'}"></div>
-            </div>
-            <div class="peer-info">
-                <h4>${peer.ip}</h4>
-                <div class="peer-meta">
-                    <span class="peer-ping">
-                        <span class="ping-dot ${peer.online ? 'online' : 'offline'}"></span>
-                        ${peer.ping}ms
-                    </span>
+    // Добавляем класс обновления для плавного перехода
+    peersList.classList.add('updating');
+    
+    // Используем requestAnimationFrame для плавного рендеринга
+    requestAnimationFrame(() => {
+        const newHTML = filtered.map(peer => `
+            <div class="peer-item ${activePeer?.id === peer.id ? 'active' : ''}" data-peer-username="${peer.username}">
+                <div class="avatar">
+                    <span>${getInitials(peer.username)}</span>
+                    <div class="status-indicator ${peer.online ? 'online' : 'offline'}"></div>
+                </div>
+                <div class="peer-info">
+                    <h4>${peer.username}</h4>
+                    <div class="peer-meta">
+                        <span class="peer-ping">
+                            <span class="ping-dot ${peer.online ? 'online' : 'offline'}"></span>
+                            ${peer.ping}ms
+                        </span>
+                        <span class="peer-status">${peer.online ? 'В сети' : 'Не в сети'}</span>
+                    </div>
                 </div>
             </div>
-        </div>
-    `).join('');
-
-    document.querySelectorAll('.peer-item').forEach(item => {
-        item.addEventListener('click', () => {
-            const username = item.dataset.peerUsername;
-            selectPeerByUsername(username);
-        });
+        `).join('');
+        
+        // Проверяем, изменился ли HTML перед обновлением
+        if (peersList.innerHTML !== newHTML) {
+            peersList.innerHTML = newHTML;
+            
+            // Добавляем обработчики событий только для новых элементов
+            document.querySelectorAll('.peer-item').forEach(item => {
+                if (!item.hasAttribute('data-listener')) {
+                    item.addEventListener('click', () => {
+                        const username = item.dataset.peerUsername;
+                        const peer = peers.find(p => p.username === username);
+                        if (peer) selectPeer(peer);
+                    });
+                    item.setAttribute('data-listener', 'true');
+                }
+            });
+        }
+        
+        // Убираем класс обновления после рендеринга
+        setTimeout(() => {
+            peersList.classList.remove('updating');
+        }, 100);
     });
 }
 
@@ -348,17 +368,17 @@ async function selectPeerByUsername(username) {
         } catch (e) {
             // ignore polling errors
         }
-    }, 2000);
+    }, 1000);
 }
 
 function updateHeader() {
     if (!activePeer) return;
 
     headerAvatar.innerHTML = `
-        <span>${getInitials(activePeer.ip)}</span>
+        <span>${getInitials(activePeer.username)}</span>
         <div class="status-indicator ${activePeer.online ? 'online' : 'offline'}"></div>
     `;
-    headerName.textContent = activePeer.ip;
+    headerName.textContent = activePeer.username;
     headerStatus.textContent = `${activePeer.ping}ms`;
 }
 
@@ -366,44 +386,65 @@ function renderMessages() {
     if (!activePeer || !messages[activePeer.username]) return;
 
     const msgs = messages[activePeer.username];
+    
+    // Добавляем класс обновления для плавного перехода
+    messagesArea.classList.add('updating');
 
-    messagesArea.innerHTML = msgs.map(msg => `
-        <div class="message ${msg.sent ? 'sent' : 'received'}">
-            ${!msg.sent ? `
-                <div class="message-avatar">
-                    <span>${msg.from}</span>
-                </div>
-            ` : ''}
-            <div class="message-content">
-                <div class="message-bubble">${(() => {
-                    const text = msg.text || '';
-                    // find first URL-like token
-                    const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+)/);
-                    if (m) {
-                        const url = m[0];
-                        if (isImageUrl(url)) {
-                            return `<img src="${url}" class="msg-image" />`;
+    // Используем requestAnimationFrame для плавного рендеринга
+    requestAnimationFrame(() => {
+        const newHTML = msgs.map(msg => `
+            <div class="message ${msg.sent ? 'sent' : 'received'}">
+                ${!msg.sent ? `
+                    <div class="message-avatar">
+                        <span>${getInitials(msg.from)}</span>
+                    </div>
+                ` : ''}
+                <div class="message-content">
+                    <div class="message-bubble">${(() => {
+                        const text = msg.text || '';
+                        // find first URL-like token
+                        const m = text.match(/(https?:\/\/\S+|\/uploads\/\S+)/);
+                        if (m) {
+                            const url = m[0];
+                            if (isImageUrl(url)) {
+                                return `<img src="${url}" class="msg-image" />`;
+                            }
+                            // fallback: show link and remaining text
+                            const rest = text.replace(url, '').trim();
+                            return `<a href="${url}" target="_blank">${url}</a>${rest ? ' ' + rest : ''}`;
                         }
-                        // fallback: show link and remaining text
-                        const rest = text.replace(url, '').trim();
-                        return `<a href="${url}" target="_blank">${url}</a>${rest ? ' ' + rest : ''}`;
-                    }
-                    // no url -> plain text (escape minimal)
-                    return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                })()}</div>
-                <span class="message-time">${msg.time}</span>
-            </div>
-            ${msg.sent ? `
-                <div class="message-avatar">
-                    <span>Я</span>
+                        // no url -> plain text (escape minimal)
+                        return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    })()}</div>
+                    <span class="message-time">${msg.time}</span>
                 </div>
-            ` : ''}
-        </div>
-    `).join('');
+                ${msg.sent ? `
+                    <div class="message-avatar">
+                        <span>Я</span>
+                    </div>
+                ` : ''}
+            </div>
+        `).join('');
 
-    messagesArea.scrollTop = messagesArea.scrollHeight;
-    // save to localStorage for offline/frontend-only use
-    saveMessagesToStorage(activePeer.username);
+        // Проверяем, изменился ли HTML перед обновлением
+        if (messagesArea.innerHTML !== newHTML) {
+            messagesArea.innerHTML = newHTML;
+            
+            // Плавная прокрутка к новому сообщению
+            const messagesContainer = messagesArea;
+            if (messagesContainer.scrollHeight > messagesContainer.clientHeight) {
+                messagesContainer.scrollTo({
+                    top: messagesContainer.scrollHeight,
+                    behavior: 'smooth'
+                });
+            }
+        }
+        
+        // Убираем класс обновления после рендеринга
+        setTimeout(() => {
+            messagesArea.classList.remove('updating');
+        }, 100);
+    });
 }
 
 function sendMessage() {
@@ -481,122 +522,10 @@ function sendMessage() {
 function deleteChat() {
     if (!activePeer) return;
     
-    if (confirm(`Удалить чат с ${activePeer.ip}?`)) {
+    if (confirm(`Удалить чат с ${activePeer.username}?`)) {
         messages[activePeer.username] = [];
         renderMessages();
     }
-}
-
-function startVoiceCall() {
-    if (!activePeer) return;
-    
-    callModal.classList.remove('hidden');
-    callContent.classList.remove('hidden');
-    videoCallWrapper.classList.add('hidden');
-    
-    callAvatarText.textContent = getInitials(activePeer.ip);
-    callName.textContent = activePeer.ip;
-    callStatus.textContent = 'Звонок...';
-    
-    setTimeout(() => {
-        callStatus.textContent = 'Соединение...';
-    }, 2000);
-    
-    setTimeout(() => {
-        startCallTimer();
-    }, 4000);
-}
-
-async function startVideoCall() {
-    if (!activePeer) return;
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        notifications.error('Браузер не поддерживает доступ к камере');
-        return;
-    }
-
-    try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: true
-        });
-
-        localVideo.srcObject = localStream;
-        localVideo.muted = true;
-        localVideo.playsInline = true;
-
-        callModal.classList.remove('hidden');
-        callContent.classList.remove('hidden');
-        videoCallWrapper.classList.add('hidden');
-
-        callAvatarText.textContent = getInitials(activePeer.ip);
-        callName.textContent = activePeer.ip;
-        callStatus.textContent = 'Видеозвонок...';
-
-        setTimeout(() => {
-            callStatus.textContent = 'Соединение...';
-        }, 2000);
-
-        setTimeout(() => {
-            callContent.classList.add('hidden');
-            videoCallWrapper.classList.remove('hidden');
-
-            remoteVideo.poster = '';
-            remoteVideo.removeAttribute('src');
-            remoteVideo.load();
-
-            startCallTimer();
-        }, 4000);
-    } catch (error) {
-        if (error.name === 'NotAllowedError') {
-            notifications.error('Доступ к камере запрещён');
-        } else if (error.name === 'NotFoundError') {
-            notifications.error('Камера не найдена');
-        } else {
-            notifications.error('Не удалось получить доступ к камере');
-        }
-    }
-}
-
-function startCallTimer() {
-    callSeconds = 0;
-    updateTimerDisplay();
-    
-    callTimer = setInterval(() => {
-        callSeconds++;
-        updateTimerDisplay();
-    }, 1000);
-}
-
-function updateTimerDisplay() {
-    const minutes = Math.floor(callSeconds / 60);
-    const seconds = callSeconds % 60;
-    const timeStr = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-    
-    if (videoCallWrapper.classList.contains('hidden')) {
-        callStatus.textContent = timeStr;
-    } else {
-        videoTimer.textContent = timeStr;
-    }
-}
-
-function endCall() {
-    callModal.classList.add('hidden');
-    callContent.classList.remove('hidden');
-    videoCallWrapper.classList.add('hidden');
-    callStatus.textContent = 'Звонок...';
-    
-    if (callTimer) {
-        clearInterval(callTimer);
-        callTimer = null;
-    }
-    
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-    }
-    
-    callSeconds = 0;
 }
 
 attachBtn.addEventListener('click', () => {
@@ -696,17 +625,17 @@ async function uploadFileInChunks(file, peerUsername, onProgress) {
 
 sendBtn.addEventListener('click', sendMessage);
 messageInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') sendMessage();
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
 });
-
 searchInput.addEventListener('input', (e) => {
     renderPeers(e.target.value);
 });
-
 deleteChatBtn.addEventListener('click', deleteChat);
-voiceCallBtn.addEventListener('click', startVoiceCall);
-videoCallBtn.addEventListener('click', startVideoCall);
-declineCallBtn.addEventListener('click', endCall);
-videoEndBtn.addEventListener('click', endCall);
+attachBtn.addEventListener('click', () => {
+    fileInput.click();
+});
 
 renderPeers();

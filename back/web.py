@@ -455,6 +455,8 @@ if __name__ == '__main__':
     app = create_app()
     port = int(os.environ.get('PORT', '5000'))
     print(f"Starting web server on 127.0.0.1:{port}")
+    print(f"🌐 Откройте в браузере: http://127.0.0.1:{port}/login")
+    print(f"💡 Укажите ваше имя пользователя для входа в чат")
     try:
         app.run(host='127.0.0.1', port=port, debug=False)
     except OSError as e:
