@@ -44,6 +44,7 @@ def main():
         print("2. Connect to a peer or use test mode")
         print("3. Try sending a file to test the transfer")
         print("4. Check browser console for transfer progress")
+        print(f"\n🔑 Login page: http://localhost:8080/login")
         print("\n⚠️  Press Ctrl+C to stop the server")
         print("=" * 50)
         
