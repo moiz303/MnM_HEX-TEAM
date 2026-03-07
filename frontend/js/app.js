@@ -4,6 +4,8 @@ let messages = {};
 let selectedFiles = [];
 let messagesPollInterval = null;
 let currentUsername = localStorage.getItem('messenger_username') || 'user';
+let transfersPollInterval = null;
+let activeTransfers = {};
 
 console.log('Current username from localStorage:', currentUsername);
 
@@ -250,6 +252,92 @@ async function fetchPeersPolling() {
     }
 }
 
+function startTransfersPolling() {
+    if (transfersPollInterval) clearInterval(transfersPollInterval);
+    transfersPollInterval = setInterval(async () => {
+        try {
+            const res = await fetch('/api/transfers');
+            if (!res.ok) return;
+            const data = await res.json();
+
+            data.transfers.forEach(transfer => {
+                const existing = activeTransfers[transfer.transfer_id];
+                if (!existing || existing.status !== transfer.status || existing.progress !== transfer.progress) {
+                    activeTransfers[transfer.transfer_id] = transfer;
+                    updateTransferUI(transfer);
+
+                    if (transfer.status === 'completed' && (!existing || existing.status !== 'completed')) {
+                        showTransferNotification(transfer, 'completed');
+                    } else if (transfer.status === 'failed' && (!existing || existing.status !== 'failed')) {
+                        showTransferNotification(transfer, 'failed');
+                    }
+                }
+            });
+
+            Object.keys(activeTransfers).forEach(id => {
+                const transfer = activeTransfers[id];
+                if ((transfer.status === 'completed' || transfer.status === 'failed') && 
+                    Date.now() - transfer.updated_at > 10000) {
+                    delete activeTransfers[id];
+                }
+            });
+        } catch (e) {
+            // ignore polling errors
+        }
+    }, 2000);
+}
+
+function updateTransferUI(transfer) {
+
+    const bar = document.querySelector(`.file-item[data-transfer-id="${transfer.transfer_id}"] .file-progress-bar`);
+    if (bar) {
+        bar.style.width = `${Math.round(transfer.progress || 0)}%`;
+        if (transfer.status === 'completed') {
+            bar.style.background = 'linear-gradient(90deg, #4CAF50, #4CAF50)';
+        } else if (transfer.status === 'failed') {
+            bar.style.background = 'linear-gradient(90deg, #f44336, #f44336)';
+        }
+    }
+
+    const item = document.querySelector(`.file-item[data-transfer-id="${transfer.transfer_id}"]`);
+    if (item) {
+        item.dataset.status = transfer.status;
+        const statusText = item.querySelector('.file-status');
+        if (statusText) {
+            statusText.textContent = getTransferStatusText(transfer.status);
+        }
+    }
+}
+
+function getTransferStatusText(status) {
+    switch (status) {
+        case 'pending': return 'Ожидание...';
+        case 'in_progress': return 'Передача...';
+        case 'completed': return 'Завершено';
+        case 'failed': return 'Ошибка';
+        case 'cancelled': return 'Отменено';
+        default: return status;
+    }
+}
+
+function showTransferNotification(transfer, type) {
+    const message = type === 'completed' 
+        ? `📁 Файл "${transfer.filename}" успешно передан`
+        : `❌ Передача файла "${transfer.filename}" не удалась: ${transfer.error || 'Неизвестная ошибка'}`;
+
+    if (activePeer && messages[activePeer.username]) {
+        messages[activePeer.username].push({
+            text: message,
+            time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+            sent: false,
+            system: true
+        });
+        renderMessages();
+    }
+}
+
+startTransfersPolling();
+
 fetchPeersPolling();
 setInterval(fetchPeersPolling, 1000);
 
@@ -345,41 +433,79 @@ function renderMessages() {
         return;
     }
 
-    const chatMessages = messages[activePeer.username] || [];
+    const msgs = messages[activePeer.username] || [];
 
-    if (chatMessages.length === 0) {
+    if (msgs.length === 0) {
         messagesArea.innerHTML = `
             <div class="empty-state">
                 <svg width="100" height="100" viewBox="0 0 100 100" fill="currentColor">
                     <path d="M50 20c-16.5 0-30 13.5-30 30s13.5 30 30 30 30-13.5 30-30-13.5-30-30-30zm0 55c-13.8 0-25-11.2-25-25s11.2-25 25-25 25 11.2 25 25-11.2 25-25 25z"/>
                     <path d="M35 45h30v5H35z"/>
                 </svg>
-                <p>Нет сообщений</p>
+                <p>Нет сообщений. Начните диалог!</p>
             </div>
         `;
         return;
     }
 
-    const html = chatMessages.map(msg => {
-        const time = new Date(msg.time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        const cssClass = msg.sent ? 'sent' : 'received';
-        const from = msg.sent ? currentUsername : activePeer.username;
+    messagesArea.classList.add('updating');
 
-        return `
-            <div class="message ${cssClass}">
-                <div class="message-avatar">${getInitials(from)}</div>
-                <div class="message-content">
-                    <div class="message-bubble">
-                        ${escapeHtml(msg.text)}
-                        <span class="message-time">${time}</span>
+    requestAnimationFrame(() => {
+        const newHTML = msgs.map(msg => {
+            const from = msg.sent ? currentUsername : (msg.from || activePeer.username);
+
+            const timeStr = (() => {
+                try {
+                    return new Date(msg.time).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                } catch {
+                    return msg.time || '';
+                }
+            })();
+
+            const bubbleContent = (() => {
+                const text = msg.text || '';
+                const urlMatch = text.match(/(https?:\/\/\S+|\/uploads\/\S+|\/downloads\/\S+)/);
+                if (urlMatch) {
+                    const url = urlMatch[0];
+                    if (isImageUrl(url)) {
+                        return `<img src="${url}" class="msg-image"
+                                     onclick="window.open('${url}','_blank')"
+                                     onerror="this.style.display='none'">`;
+                    }
+                    const rest = text.replace(url, '').trim();
+                    const filename = url.split('/').pop();
+                    return `<a href="${url}" target="_blank">📎 ${filename}</a>${rest ? ' ' + escapeHtml(rest) : ''}`;
+                }
+                return escapeHtml(text);
+            })();
+
+            return `
+                <div class="message ${msg.system ? 'system' : (msg.sent ? 'sent' : 'received')}">
+                    ${!msg.sent && !msg.system ? `
+                        <div class="message-avatar"><span>${getInitials(from)}</span></div>
+                    ` : ''}
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            ${bubbleContent}
+                            <span class="message-time">
+                                ${timeStr}${msg.status === 'sending' ? ' (отправка...)' : ''}
+                            </span>
+                        </div>
                     </div>
+                    ${msg.sent && !msg.system ? `
+                        <div class="message-avatar"><span>${getInitials(from)}</span></div>
+                    ` : ''}
                 </div>
-            </div>
-        `;
-    }).join('');
+            `;
+        }).join('');
 
-    messagesArea.innerHTML = html;
-    messagesArea.scrollTop = messagesArea.scrollHeight;
+        if (messagesArea.innerHTML !== newHTML) {
+            messagesArea.innerHTML = newHTML;
+            messagesArea.scrollTo({ top: messagesArea.scrollHeight, behavior: 'smooth' });
+        }
+
+        setTimeout(() => messagesArea.classList.remove('updating'), 100);
+    });
 }
 
 function updateHeader() {
@@ -399,53 +525,155 @@ function updateHeader() {
 }
 
 async function sendMessage() {
-    if (!activePeer) return;
+    if (!activePeer || (!messageInput.value.trim() && selectedFiles.length === 0)) return;
 
     const text = messageInput.value.trim();
+    const now = new Date();
+    const time = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    if (!text && selectedFiles.length === 0) return;
+    if (text) {
+        messages[activePeer.username] = messages[activePeer.username] || [];
+        messages[activePeer.username].push({
+            id: localId,
+            text,
+            time,
+            sent: true,
+            from: currentUsername,
+            status: 'sending'
+        });
+        messageInput.value = '';
+        renderMessages();
+    }
+
+    if (selectedFiles.length > 0) {
+        messages[activePeer.username] = messages[activePeer.username] || [];
+        selectedFiles.forEach(item => {
+            messages[activePeer.username].push({
+                text: `📎 ${item.file.name}`,
+                time,
+                sent: true,
+                from: currentUsername
+            });
+        });
+        renderMessages();
+    }
 
     if (text) {
         try {
             const response = await fetch('/api/send_message', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    peer: activePeer.username,
-                    text: text
-                })
+                body: JSON.stringify({ peer: activePeer.username, text })
             });
 
             const result = await response.json();
 
-            if (result.success) {
-                const newMsg = {
-                    id: result.msg_id || Date.now().toString(),
-                    from: currentUsername,
-                    text: text,
-                    time: new Date().toISOString(),
-                    sent: true
-                };
+            const ok = result.success || result.status === 'sent';
 
-                messages[activePeer.username] = messages[activePeer.username] || [];
-                messages[activePeer.username].push(newMsg);
-
+            if (ok) {
+                const msgList = messages[activePeer.username];
+                if (msgList) {
+                    for (let i = msgList.length - 1; i >= 0; i--) {
+                        const msg = msgList[i];
+                        if (msg.id === localId || (msg.text === text && msg.status === 'sending')) {
+                            msg.id = result.msg_id || result.timestamp
+                                ? `sent_${result.msg_id || result.timestamp}`
+                                : msg.id;
+                            msg.status = 'sent';
+                            break;
+                        }
+                    }
+                }
                 saveMessagesToStorage(activePeer.username);
                 renderMessages();
-                messageInput.value = '';
+
+                setTimeout(() => {
+                    if (activePeer && messagesPollInterval) {
+                        clearInterval(messagesPollInterval);
+                        startMessagePolling();
+                    }
+                }, 500);
             } else {
-                notifications.error(`Ошибка отправки: ${result.error}`);
+                notifications.error(`Ошибка отправки: ${result.error || 'неизвестная ошибка'}`);
             }
         } catch (err) {
             console.error('Send error:', err);
-            notifications.error('Не удалось отправить сообщение');
+            notifications.error('Ошибка при отправке сообщения');
         }
     }
 
     if (selectedFiles.length > 0) {
-        for (const {file, uid} of selectedFiles) {
-            await uploadFile(file, uid);
+        const filesToUpload = selectedFiles.slice();
+
+        for (const { file, uid } of filesToUpload) {
+            try {
+                const res = await uploadFileInChunks(file, activePeer.username, (p) => {
+                    const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
+                    if (bar) bar.style.width = `${Math.round(p * 100)}%`;
+                });
+
+                if (res?.upload_id) {
+                    try {
+                        const sendRes = await fetch('/api/send_uploaded_file', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
+                        });
+
+                        if (sendRes.ok) {
+                            const sendData = await sendRes.json();
+
+                            if (sendData.transfer_id) {
+                                activeTransfers[sendData.transfer_id] = {
+                                    transfer_id: sendData.transfer_id,
+                                    filename: file.name,
+                                    status: 'pending',
+                                    progress: 0,
+                                    direction: 'upload'
+                                };
+                                const fileItem = document.querySelector(`.file-item[data-uid="${uid}"]`);
+                                if (fileItem) {
+                                    fileItem.dataset.transferId = sendData.transfer_id;
+                                    const statusDiv = document.createElement('div');
+                                    statusDiv.className = 'file-status';
+                                    statusDiv.textContent = 'Ожидание...';
+                                    fileItem.appendChild(statusDiv);
+                                }
+                            } else if (res.file_url) {
+                                await fetch('/api/send_message', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        peer: activePeer.username,
+                                        text: `📎 ${file.name} ${res.file_url}`
+                                    })
+                                }).catch(() => {});
+                            }
+                        } else {
+                            throw new Error('P2P send failed');
+                        }
+                    } catch (err) {
+                        console.warn('P2P fallback to link:', err);
+                        if (res.file_url) {
+                            await fetch('/api/send_message', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    peer: activePeer.username,
+                                    text: `📎 ${file.name} ${res.file_url}`
+                                })
+                            }).catch(() => {});
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('Upload failed:', err);
+                const bar = document.querySelector(`.file-item[data-uid="${uid}"] .file-progress-bar`);
+                if (bar) bar.style.background = 'linear-gradient(90deg, var(--color-error), var(--color-error))';
+            }
         }
+
         selectedFiles = [];
         renderFilePreview();
     }
