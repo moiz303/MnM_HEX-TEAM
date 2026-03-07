@@ -7,6 +7,8 @@ import threading
 import time
 import hashlib
 import uuid
+import socket
+import os
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -176,32 +178,122 @@ class FileTransferManager:
                 print(f"[file_transfer] chunk {i}: size={len(data)}, hash={chunk_hash[:8]}..., first50={data_first_50}")
 
     def _send_chunks_loop(self, session: TransferSession):
-        """Цикл отправки чанков с flow control"""
+        """Цикл отправки чанков с улучшенным flow control и retry"""
         try:
-            for chunk_index in range(session.file_info.chunk_count):
-                with self.transfer_lock:
-                    if session.status != 'in_progress':
-                        break
-                    chunk = session.chunks.get(chunk_index)
-                    if not chunk:
-                        print(f"[file_transfer] Missing chunk {chunk_index}")
-                        continue
+            failed_chunks = []
+            retry_count = 0
+            max_retries = 3
+            
+            while retry_count < max_retries:
+                chunks_to_send = failed_chunks if failed_chunks else range(session.file_info.chunk_count)
+                
+                for chunk_index in chunks_to_send:
+                    with self.transfer_lock:
+                        if session.status != 'in_progress':
+                            break
+                        chunk = session.chunks.get(chunk_index)
+                        if not chunk:
+                            print(f"[file_transfer] Missing chunk {chunk_index}")
+                            continue
 
-                self._send_chunk(session, chunk)
-                time.sleep(0.05)  # Small delay between chunks
+                    success = self._send_chunk_with_ack(session, chunk)
+                    if not success:
+                        if chunk_index not in failed_chunks:
+                            failed_chunks.append(chunk_index)
+                        print(f"[file_transfer] Failed to send chunk {chunk_index}, will retry")
+                    else:
+                        if chunk_index in failed_chunks:
+                            failed_chunks.remove(chunk_index)
 
-            # Wait a bit for all chunks to be processed
-            time.sleep(1.0)
+                # If all chunks succeeded, we're done
+                if not failed_chunks:
+                    break
+                    
+                retry_count += 1
+                print(f"[file_transfer] Retry {retry_count}/{max_retries} for {len(failed_chunks)} failed chunks")
+                time.sleep(1.0)  # Wait before retry
+
+            # Final check
             with self.transfer_lock:
                 if len(session.completed_chunks) >= session.file_info.chunk_count:
                     self._finalize_transfer(session, success=True)
                 else:
-                    self._finalize_transfer(session, success=False, error=f"Only {len(session.completed_chunks)}/{session.file_info.chunk_count} chunks completed")
+                    failed_count = len(failed_chunks)
+                    error = f"Failed to send {failed_count}/{session.file_info.chunk_count} chunks after {max_retries} retries"
+                    self._finalize_transfer(session, success=False, error=error)
+                    
         except Exception as e:
             print(f"[file_transfer] Error in _send_chunks_loop: {e}")
             import traceback
             traceback.print_exc()
             self._finalize_transfer(session, success=False, error=str(e))
+
+    def _send_chunk_with_ack(self, session: TransferSession, chunk: ChunkInfo) -> bool:
+        """Отправка чанка с ожиданием ACK"""
+        import base64
+        session_key = self.crypto.get_session_key(session.file_info.receiver_id)
+        if session_key:
+            encrypted_data = self.crypto.encrypt_with_key(chunk.data, session_key)
+            data_hex = base64.b64encode(encrypted_data).decode()
+            print(f"[file_transfer] SEND chunk {chunk.chunk_index}: orig={len(chunk.data)}, encr={len(encrypted_data)}, b64_len={len(data_hex)}, hash={chunk.chunk_hash[:8]}...")
+        else:
+            data_hex = base64.b64encode(chunk.data).decode()
+            print(f"[file_transfer] SEND chunk {chunk.chunk_index}: size={len(chunk.data)}, b64_len={len(data_hex)}, hash={chunk.chunk_hash[:8]}..., no_encrypt")
+
+        msg = create_message(
+            MessageType.FILE_CHUNK,
+            file_id=session.transfer_id,
+            chunk_index=chunk.chunk_index,
+            total_chunks=session.file_info.chunk_count,
+            data=data_hex,
+            checksum=chunk.chunk_hash
+        )
+
+        import json
+        msg_size = len(json.dumps(msg).encode())
+        print(f"[file_transfer] chunk {chunk.chunk_index} message size: {msg_size} bytes, hash={chunk.chunk_hash[:8]}...")
+        if msg_size > 64000:
+            print(f"[file_transfer] ⚠️ WARNING: chunk {chunk.chunk_index} message exceeds 64KB threshold!")
+
+        # use target_ip stored in session (should be the peer's IP)
+        dest = session.target_ip or session.file_info.receiver_id
+        print(f"[file_transfer] sending chunk {chunk.chunk_index} to {dest}")
+        
+        # Try to send with retry
+        for attempt in range(3):
+            success = self._send_to_peer(dest, msg, session.circuit_id)
+            if success:
+                break
+            print(f"[file_transfer] Send attempt {attempt + 1} failed for chunk {chunk.chunk_index}")
+            time.sleep(0.5)
+        
+        if not success:
+            print(f"[file_transfer] ⚠️ Failed to send chunk {chunk.chunk_index} to {dest} after 3 attempts")
+            return False
+        
+        print(f"[file_transfer] ✅ Chunk {chunk.chunk_index} sent successfully")
+        chunk.sent_at = time.time()
+
+        # Wait for ACK with timeout
+        ack_received = self._wait_for_ack(session.transfer_id, chunk.chunk_index, timeout=5.0)
+        if ack_received:
+            with self.transfer_lock:
+                if chunk_index not in session.completed_chunks:
+                    session.completed_chunks.append(chunk_index)
+            return True
+        else:
+            print(f"[file_transfer] ⚠️ No ACK received for chunk {chunk.chunk_index}")
+            return False
+
+    def _wait_for_ack(self, transfer_id: str, chunk_index: int, timeout: float) -> bool:
+        """Wait for ACK for a specific chunk"""
+        ack_key = f"{transfer_id}:{chunk_index}"
+        ack_event = threading.Event()
+        
+        with self.transfer_lock:
+            self.pending_acks[ack_key] = ack_event
+        
+        return ack_event.wait(timeout)
 
     def _send_chunk(self, session: TransferSession, chunk: ChunkInfo):
         """Отправка одного чанка"""
@@ -246,10 +338,9 @@ class FileTransferManager:
         if ack_key in self.pending_acks:
             del self.pending_acks[ack_key]
 
-    def _send_to_peer(self, peer_ip: str, msg: dict, circuit_id: Optional[str] = None) -> bool:
-        """Send a message to a peer IP (ignores device_id confusion).
-        Circuit_id is currently only used for relaying; router logic is minimal.
-        Returns True if sent successfully, False otherwise.
+    def _send_to_peer(self, peer_identifier: str, msg: dict, circuit_id: Optional[str] = None) -> bool:
+        """Send a message to a peer. peer_identifier can be IP address or device_id.
+        Circuit_id is used for relayed transfers. Returns True if sent successfully.
         """
         if circuit_id and self.router:
             # forward through relay network if a circuit exists
@@ -259,9 +350,43 @@ class FileTransferManager:
             except Exception as e:
                 print(f"[file_transfer] Relay send error: {e}")
                 return False
+        
+        # Try to determine if peer_identifier is an IP address or device_id
+        if self._is_ip_address(peer_identifier):
+            # It's an IP address, send directly
+            return self.conn_mgr.send_to_peer(peer_identifier, msg)
         else:
-            # always send directly by IP
-            return self.conn_mgr.send_to_peer(peer_ip, msg)
+            # It's likely a device_id, try to find the corresponding IP
+            peer_ip = self._find_ip_by_device_id(peer_identifier)
+            if peer_ip:
+                return self.conn_mgr.send_to_peer(peer_ip, msg)
+            else:
+                print(f"[file_transfer] Cannot find IP for device_id {peer_identifier}")
+                return False
+
+    def _is_ip_address(self, identifier: str) -> bool:
+        """Check if the identifier looks like an IP address"""
+        try:
+            socket.inet_aton(identifier)
+            return True
+        except socket.error:
+            return False
+
+    def _find_ip_by_device_id(self, device_id: str) -> Optional[str]:
+        """Find IP address by device_id using connection manager or discovery"""
+        # Try to get from connection manager if it has peer mapping
+        if hasattr(self.conn_mgr, 'get_peer_ip'):
+            return self.conn_mgr.get_peer_ip(device_id)
+        
+        # Try to find through discovery if available
+        if hasattr(self.conn_mgr, 'discovery') or hasattr(self, 'router'):
+            discovery = getattr(self.conn_mgr, 'discovery', getattr(self.router, 'discovery', None))
+            if discovery:
+                for ip, info in discovery.get_all_peers().items():
+                    if info.get('device_id') == device_id:
+                        return ip
+        
+        return None
 
     def handle_file_offer(self, data: dict, sender_id: str):
         """Обработка предложения файла"""
@@ -334,6 +459,9 @@ class FileTransferManager:
 
         print(f"[file_transfer] handle_file_chunk called: transfer_id={transfer_id}, chunk_index={chunk_index}, sender_id={sender_id}")
 
+        # Normalize sender_id to get the actual device_id for encryption
+        actual_sender_id = self._normalize_sender_id(sender_id)
+
         with self.transfer_lock:
             session = self.active_transfers.get(transfer_id)
             if not session:
@@ -342,7 +470,7 @@ class FileTransferManager:
 
             try:
                 import base64
-                session_key = self.crypto.get_session_key(sender_id)
+                session_key = self.crypto.get_session_key(actual_sender_id)
                 
                 # Always decode from base64 first
                 encrypted_bytes = base64.b64decode(chunk_data_hex)
@@ -380,6 +508,7 @@ class FileTransferManager:
             if len(session.completed_chunks) >= session.file_info.chunk_count:
                 self._finalize_transfer(session, success=True)
 
+        # Send ACK using the original sender_id format
         ack_msg = create_message(
             MessageType.DELIVERY_RECEIPT,
             chat_id=session.file_info.sender_id,
@@ -387,10 +516,42 @@ class FileTransferManager:
             status='delivered'
         )
         self.conn_mgr.send_message(sender_id, ack_msg)
+        
+        # Signal ACK for this chunk
+        ack_key = f"{transfer_id}:{chunk_index}"
+        with self.transfer_lock:
+            if ack_key in self.pending_acks:
+                self.pending_acks[ack_key].set()
+                del self.pending_acks[ack_key]
 
         if self.on_progress:
             progress = len(session.completed_chunks) / session.file_info.chunk_count * 100
             self.on_progress(transfer_id, progress, session.bytes_transferred)
+
+    def _normalize_sender_id(self, sender_id: str) -> str:
+        """Convert sender_id to device_id format for encryption purposes"""
+        # If it's already a device_id (hex-like), return as is
+        if len(sender_id) >= 16 and all(c in '0123456789abcdefABCDEF' for c in sender_id):
+            return sender_id
+        
+        # If it's an IP address, try to find the corresponding device_id
+        if self._is_ip_address(sender_id):
+            device_id = self._find_device_id_by_ip(sender_id)
+            if device_id:
+                return device_id
+        
+        # Return original if we can't determine
+        return sender_id
+
+    def _find_device_id_by_ip(self, ip: str) -> Optional[str]:
+        """Find device_id by IP address using discovery"""
+        if hasattr(self.conn_mgr, 'discovery') or hasattr(self, 'router'):
+            discovery = getattr(self.conn_mgr, 'discovery', getattr(self.router, 'discovery', None))
+            if discovery:
+                info = discovery.get_all_peers().get(ip)
+                if info:
+                    return info.get('device_id')
+        return None
 
     def _write_chunk(self, file_path: str, chunk_index: int, data: bytes):
         """Запись чанка в файл по смещению"""

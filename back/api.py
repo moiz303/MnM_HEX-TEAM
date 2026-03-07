@@ -50,6 +50,12 @@ class LocalAPI:
 
             # Своя информация
             'get_my_info': self._handle_get_my_info,
+        
+            # Файлы
+            'send_file': self._handle_send_file,
+            'get_transfers': self._handle_get_transfers,
+            'get_transfer_info': self._handle_get_transfer_info,
+            'cancel_transfer': self._handle_cancel_transfer,
         }
 
         # ID запросов и их обработчики
@@ -387,6 +393,62 @@ class LocalAPI:
             'active_chats': len(self.backend.active_chats),
             'total_messages': 0  # Заглушка
         }
+
+    def _handle_send_file(self, params: dict) -> dict:
+        """Отправить файл пиру"""
+        peer = params.get('peer')
+        file_path = params.get('file_path')
+        
+        if not peer or not file_path:
+            raise ValueError("peer and file_path required")
+        
+        try:
+            transfer_id = self.backend.send_file(peer, file_path)
+            return {
+                'status': 'initiated',
+                'transfer_id': transfer_id,
+                'timestamp': time.time()
+            }
+        except Exception as e:
+            raise ValueError(f"Failed to send file: {e}")
+
+    def _handle_get_transfers(self, params: dict) -> dict:
+        """Получить список активных передач"""
+        if hasattr(self.backend, 'router') and hasattr(self.backend.router, 'file_manager'):
+            transfers = self.backend.router.file_manager.get_all_transfers()
+            return {'transfers': transfers, 'total': len(transfers)}
+        else:
+            return {'transfers': [], 'total': 0}
+
+    def _handle_get_transfer_info(self, params: dict) -> dict:
+        """Получить информацию о передаче"""
+        transfer_id = params.get('transfer_id')
+        if not transfer_id:
+            raise ValueError("transfer_id required")
+        
+        if hasattr(self.backend, 'router') and hasattr(self.backend.router, 'file_manager'):
+            info = self.backend.router.file_manager.get_transfer_info(transfer_id)
+            if info:
+                return info
+            else:
+                raise ValueError("Transfer not found")
+        else:
+            raise ValueError("File transfer manager not available")
+
+    def _handle_cancel_transfer(self, params: dict) -> dict:
+        """Отменить передачу файла"""
+        transfer_id = params.get('transfer_id')
+        if not transfer_id:
+            raise ValueError("transfer_id required")
+        
+        if hasattr(self.backend, 'router') and hasattr(self.backend.router, 'file_manager'):
+            success = self.backend.router.file_manager.cancel_transfer(transfer_id)
+            if success:
+                return {'status': 'cancelled', 'transfer_id': transfer_id}
+            else:
+                raise ValueError("Failed to cancel transfer or transfer not found")
+        else:
+            raise ValueError("File transfer manager not available")
 
     def _handle_rotate_keys(self, params: dict) -> dict:
         """Смена ключей"""
