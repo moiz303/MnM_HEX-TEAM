@@ -593,11 +593,12 @@ class FileTransferManager:
         """Отправка ACK для чанка"""
         ack_msg = create_message(
             MessageType.DELIVERY_RECEIPT,
-            chat_id=sender_id,  # Use sender_id directly
+            chat_id=sender_id,  # Use sender_id directly (this is the IP for routing)
             in_response_to=msg_id,
             status='delivered'
         )
-        self.conn_mgr.send_message(sender_id, ack_msg)
+        # Use the original IP address for routing, not the device_id
+        self.conn_mgr.send_to_peer(sender_id, ack_msg)
         
         # Signal ACK for this chunk
         ack_key = f"{transfer_id}:{chunk_index}"
@@ -954,7 +955,7 @@ class FileTransferManager:
                 error_message='user_cancelled'
             )
             target = session.file_info.receiver_id if session.direction == 'upload' else session.file_info.sender_id
-            self.conn_mgr.send_message(target, msg)
+            self.conn_mgr.send_to_peer(target, msg)
             return True
 
     def shutdown(self):
