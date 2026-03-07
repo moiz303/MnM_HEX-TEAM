@@ -235,7 +235,7 @@ function renderMessages() {
         <div class="message ${msg.sent ? 'sent' : 'received'}">
             ${!msg.sent ? `
                 <div class="message-avatar">
-                    <span>${msg.from === 'me' ? 'Я' : msg.from}</span>
+                    <span>${msg.from}</span>
                 </div>
             ` : ''}
             <div class="message-content">
