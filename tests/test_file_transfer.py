@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 Test script for file transfer functionality.
-Run this to verify the file transfer system works correctly.
+Run this to verify file transfer system works correctly.
 """
 
 import os
 import sys
 import time
 import tempfile
+import hashlib
+from pathlib import Path
 
 # Добавляем путь к back директории
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'back'))
-import hashlib
-from pathlib import Path
 
 def create_test_file(size_mb=1, filename="test_file.txt"):
     """Create a test file with specified size."""

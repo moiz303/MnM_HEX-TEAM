@@ -510,5 +510,13 @@ class SecureCryptoCore:
                     print(f"[crypto] ✅ Found session key for {peer_id} via local_to_remote mapping {local_id} -> {remote_id}")
                     return self._session_keys[local_id].encrypt_key.read()
         
+        # Ищем по IP маппингам (ip_192_168_1_100)
+        ip_session_id = f"ip_{peer_id.replace('.', '_')}"
+        print(f"[crypto] 🔍 Checking IP mapping: {ip_session_id}")
+        print(f"[crypto] 🔍 Available session IDs: {list(self._session_keys.keys())}")
+        if ip_session_id in self._session_keys:
+            print(f"[crypto] ✅ Found session key for {peer_id} via IP mapping {ip_session_id}")
+            return self._session_keys[ip_session_id].encrypt_key.read()
+        
         print(f"[crypto] ❌ No session key found for {peer_id}")
         return None

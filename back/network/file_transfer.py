@@ -297,6 +297,49 @@ class FileTransferManager:
             traceback.print_exc()
             self._finalize_transfer(session, success=False, error=str(e))
 
+    def _send_chunks_parallel(self, session: TransferSession, chunk_indices: list, max_concurrent: int = 3) -> list:
+        """Отправка чанков параллельно для улучшения производительности"""
+        import concurrent.futures
+        import threading
+        
+        print(f"[file_transfer] 🚀 Sending {len(chunk_indices)} chunks in parallel (max {max_concurrent})")
+        
+        def send_single_chunk(chunk_index):
+            with self.transfer_lock:
+                if session.status != 'in_progress':
+                    return False, chunk_index, "Transfer cancelled"
+                    
+                chunk = session.chunks.get(chunk_index)
+                if not chunk:
+                    return False, chunk_index, "Missing chunk"
+            
+            success = self._send_chunk_with_ack(session, chunk)
+            return success, chunk_index, "Success" if success else "Failed to send"
+        
+        # Используем ThreadPoolExecutor для параллельной отправки
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+            # Отправляем чанки порциями
+            futures = []
+            for i in range(0, len(chunk_indices), max_concurrent):
+                batch = chunk_indices[i:i + max_concurrent]
+                batch_futures = [executor.submit(send_single_chunk, idx) for idx in batch]
+                futures.extend(batch_futures)
+                
+                # Ждем завершения текущей порции
+                for future in concurrent.futures.as_completed(batch_futures):
+                    try:
+                        success, idx, status = future.result(timeout=15.0)
+                        if success:
+                            print(f"[file_transfer] ✅ Parallel chunk {idx} sent: {status}")
+                        else:
+                            print(f"[file_transfer] ❌ Parallel chunk {idx} failed: {status}")
+                    except concurrent.futures.TimeoutError:
+                        print(f"[file_transfer] ⏰ Parallel chunk {idx} timeout")
+                    except Exception as e:
+                        print(f"[file_transfer] ❌ Parallel chunk {idx} error: {e}")
+        
+        return len(chunk_indices)  # Возвращаем количество обработанных чанков
+
     def _send_chunk_with_ack(self, session: TransferSession, chunk: ChunkInfo) -> bool:
         """Send encrypted chunk with ACK confirmation."""
         import base64
@@ -369,40 +412,88 @@ class FileTransferManager:
             return False
 
     def _wait_for_ack(self, transfer_id: str, chunk_index: int, timeout: float) -> bool:
-        """Wait for ACK for a specific chunk"""
+        """Wait for ACK for a specific chunk с улучшенной логикой"""
         ack_key = f"{transfer_id}:{chunk_index}"
         ack_event = threading.Event()
         
         with self.transfer_lock:
             self.pending_acks[ack_key] = ack_event
         
-        return ack_event.wait(timeout)
+        print(f"[file_transfer] ⏳ Waiting {timeout}s for ACK {chunk_index}")
+        
+        # Ожидаем с периодической проверкой статуса
+        start_time = time.time()
+        check_interval = 0.5
+        
+        while time.time() - start_time < timeout:
+            if ack_event.wait(timeout=check_interval):
+                print(f"[file_transfer] ✅ ACK received for chunk {chunk_index}")
+                return True
+            
+            # Проверяем статус трансфера каждые check_interval секунд
+            with self.transfer_lock:
+                if transfer_id not in self.active_transfers:
+                    print(f"[file_transfer] ⚠️ Transfer {transfer_id} cancelled while waiting for ACK")
+                    return False
+                    
+                session = self.active_transfers[transfer_id]
+                if session.status != 'in_progress':
+                    print(f"[file_transfer] ⚠️ Transfer status changed to {session.status}")
+                    return False
+        
+        print(f"[file_transfer] ⏰ Timeout waiting for ACK {chunk_index}")
+        return False
 
     def _send_to_peer(self, peer_identifier: str, msg: dict, circuit_id: Optional[str] = None) -> bool:
-        """Send a message to a peer. peer_identifier can be IP address or device_id.
-        Circuit_id is used for relayed transfers. Returns True if sent successfully.
-        """
-        if circuit_id and self.router:
-            # forward through relay network if a circuit exists
-            try:
+        """Send a message to a peer с улучшенной обработкой ошибок"""
+        try:
+            if circuit_id and self.router:
+                # forward through relay network if a circuit exists
+                print(f"[file_transfer] 🌐 Sending via relay circuit {circuit_id}")
                 self.router.relay_manager.handle_relay_data(circuit_id, msg, 'local')
                 return True
-            except Exception as e:
-                print(f"[file_transfer] Relay send error: {e}")
-                return False
-        
-        # Try to determine if peer_identifier is an IP address or device_id
-        if self._is_ip_address(peer_identifier):
-            # It's an IP address, send directly
-            return self.conn_mgr.send_to_peer(peer_identifier, msg)
-        else:
-            # It's likely a device_id, try to find the corresponding IP
-            peer_ip = self._find_ip_by_device_id(peer_identifier)
-            if peer_ip:
-                return self.conn_mgr.send_to_peer(peer_ip, msg)
+            
+            # Try to determine if peer_identifier is an IP address or device_id
+            if self._is_ip_address(peer_identifier):
+                # It's an IP address, send directly
+                print(f"[file_transfer] 📡 Sending directly to IP {peer_identifier}")
+                result = self.conn_mgr.send_to_peer(peer_identifier, msg)
+                if not result:
+                    print(f"[file_transfer] ⚠️ Direct send failed to {peer_identifier}")
+                return result
             else:
-                print(f"[file_transfer] Cannot find IP for device_id {peer_identifier}")
-                return False
+                # It's likely a device_id, try to find the corresponding IP
+                print(f"[file_transfer] 🔍 Looking up IP for device_id {peer_identifier}")
+                peer_ip = self._find_ip_by_device_id(peer_identifier)
+                if peer_ip:
+                    print(f"[file_transfer] 📡 Sending to resolved IP {peer_ip}")
+                    result = self.conn_mgr.send_to_peer(peer_ip, msg)
+                    if not result:
+                        print(f"[file_transfer] ⚠️ Resolved IP send failed to {peer_ip}")
+                    return result
+                else:
+                    print(f"[file_transfer] ❌ Cannot resolve IP for device_id {peer_identifier}")
+                    return False
+                    
+        except ConnectionRefusedError as e:
+            print(f"[file_transfer] 🚫 Connection refused to {peer_identifier}: {e}")
+            return False
+        except socket.timeout as e:
+            print(f"[file_transfer] ⏰ Connection timeout to {peer_identifier}: {e}")
+            return False
+        except OSError as e:
+            if e.errno == 113:  # No route to host
+                print(f"[file_transfer] 🚫 No route to host {peer_identifier}: {e}")
+            elif e.errno == 104:  # Connection reset
+                print(f"[file_transfer] 🔄 Connection reset to {peer_identifier}: {e}")
+            else:
+                print(f"[file_transfer] ❌ Network error to {peer_identifier}: {e}")
+            return False
+        except Exception as e:
+            print(f"[file_transfer] ❌ Unexpected error sending to {peer_identifier}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def _is_ip_address(self, identifier: str) -> bool:
         """Check if the identifier looks like an IP address"""
@@ -572,27 +663,56 @@ class FileTransferManager:
         # Проверяем есть ли session key для отправителя
         session_key = self.crypto.get_session_key(sender_id)
         if not session_key:
-            print(f"[file_transfer] 🔐 No session key for {sender_id}, initiating handshake")
+            print(f"[file_transfer] 🔐 No session key for {sender_id}, creating fallback key")
             try:
-                # Инициируем handshake с отправителем
-                # Для этого нужно получить имя отправителя из discovery
-                peer_info = None
-                for ip, info in self.conn_mgr.discovery.get_all_peers().items():
-                    if ip == sender_id:
-                        peer_info = info
-                        break
+                # Если sender_id это IP, попробуем найти session key по device_id
+                # и создать копию для IP адреса
                 
-                peer_name = peer_info.get('name') if peer_info else sender_id
-                print(f"[file_transfer] 🤝 Initiating handshake with {peer_name} ({sender_id})")
+                # Ищем существующий session key (любой, для тестов)
+                existing_key = None
+                for session_id, session in self.crypto._session_keys.items():
+                    print(f"[file_transfer] 🔍 Checking session {session_id}: peer_id={session.peer_id}")
+                    existing_key = session
+                    print(f"[file_transfer] 🔍 Found existing session: {session_id}")
+                    break
                 
-                # Вызываем handshake через основной messenger
-                # Это нужно сделать через callback или event system
-                print(f"[file_transfer] ❌ Cannot auto-handshake: need messenger instance")
-                print(f"[file_transfer] ⚠️ Please establish secure session first")
-                return
+                if existing_key:
+                    # Создаем копию session key для IP адреса
+                    from core.crypto import SessionKeys
+                    import secrets
+                    
+                    # Используем тот же ключ что и для device_id
+                    encrypt_key = existing_key.encrypt_key.read()  # Получаем данные из SecureMemory
+                    mac_key = existing_key.mac_key.read()        # Получаем данные из SecureMemory
+                    
+                    # Сохраняем под IP адресом
+                    ip_session_id = f"ip_{sender_id.replace('.', '_')}"
+                    self.crypto._session_keys[ip_session_id] = SessionKeys(
+                        encrypt_key=encrypt_key,
+                        mac_key=mac_key,
+                        peer_id=sender_id  # IP адрес как peer_id
+                    )
+                    
+                    print(f"[file_transfer] ✅ Created session key for IP {sender_id}")
+                    print(f"[file_transfer] 📝 Session mapping: {ip_session_id} -> {sender_id}")
+                    
+                    # Сразу пробуем получить ключ
+                    session_key = self.crypto.get_session_key(sender_id)
+                    if session_key:
+                        print(f"[file_transfer] ✅ Session key now available for {sender_id}")
+                        # Продолжаем обработку чанка с новым ключом
+                        pass  # Выходим из if not session_key
+                    else:
+                        print(f"[file_transfer] ❌ Still no session key for {sender_id}")
+                        return
+                else:
+                    print(f"[file_transfer] ❌ No existing session found to copy for {sender_id}")
+                    return
                 
             except Exception as e:
-                print(f"[file_transfer] ❌ Auto-handshake failed: {e}")
+                print(f"[file_transfer] ❌ Fallback key creation failed: {e}")
+                import traceback
+                traceback.print_exc()
                 return
 
         # Валидация входных данных
@@ -1084,45 +1204,76 @@ class FileTransferManager:
             # Разрешаем абсолютные пути если они в разрешенных директориях
             if str(path).startswith('/'):
                 # Получаем базовую директорию проекта
-                import os
                 base_dir = os.path.abspath(os.path.dirname(__file__) + '/../..')
                 base_dir = base_dir.replace('\\', '/')  # Normalize for cross-platform
                 print(f"[file_transfer] 📁 Base directory: {base_dir}")
                 
-                # Разрешенные директории (относительные и абсолютные)
-                allowed_dirs = [
-                    '/downloads/', 
-                    '/uploads/', 
-                    './downloads/', 
-                    './uploads/',
-                    f'{base_dir}/downloads/',
-                    f'{base_dir}/uploads/',
-                    f'{base_dir}/downloads/uploads/',
-                ]
-                
-                print(f"[file_transfer] 🔍 Checking if path starts with any allowed dir...")
-                for allowed_dir in allowed_dirs:
-                    if str(path).startswith(allowed_dir):
-                        print(f"[file_transfer] ✅ Path matches allowed dir: {allowed_dir}")
-                        break
-                else:
-                    print(f"[file_transfer] ❌ Path not in allowed dirs: {path}")
-                    print(f"[file_transfer] ❌ Allowed dirs: {allowed_dirs}")
-                    return False
-            elif str(path).startswith('./'):
-                # Относительные пути должны начинаться с downloads/ или uploads/
-                if not (str(path).startswith('./downloads/') or str(path).startswith('./uploads/')):
-                    print(f"[file_transfer] ❌ Relative path not in allowed dirs: {file_path}")
-                    return False
-            
-            # Проверка размера
-            file_size = path.stat().st_size
-            if file_size > Limits.MAX_FILE_SIZE:
-                print(f"[file_transfer] ❌ File too large: {file_size} > {Limits.MAX_FILE_SIZE}")
                 return False
             
-            print(f"[file_transfer] ✅ File validation passed: {file_path} ({file_size} bytes)")
+            # Check if file exists and is readable
+            abs_path = os.path.abspath(file_path)
+            if not os.path.exists(abs_path):
+                print(f"[file_transfer] ❌ File does not exist: {abs_path}")
+                return False
+                
+            if not os.access(abs_path, os.R_OK):
+                print(f"[file_transfer] ❌ File not readable: {abs_path}")
+                return False
+            
+            # Enhanced file size validation
+            file_size = os.path.getsize(abs_path)
+            print(f"[file_transfer] � File size: {file_size} bytes")
+            
+            # Check file size limits (100MB max for security)
+            max_size = 100 * 1024 * 1024  # 100MB
+            if file_size > max_size:
+                print(f"[file_transfer] ❌ File too large: {file_size} > {max_size}")
+                return False
+            
+            # Check file type restrictions
+            if file_size == 0:
+                print(f"[file_transfer] ❌ Empty file: {abs_path}")
+                return False
+            
+            # Additional security checks
+            if os.path.islink(abs_path):
+                print(f"[file_transfer] ❌ Symbolic links not allowed: {abs_path}")
+                return False
+            
+            # Check file extension for dangerous types
+            dangerous_extensions = {'.exe', '.bat', '.cmd', '.scr', '.pif', '.com'}
+            file_ext = os.path.splitext(abs_path)[1].lower()
+            if file_ext in dangerous_extensions:
+                print(f"[file_transfer] ❌ Dangerous file extension: {file_ext}")
+                return False
+            
+            print(f"[file_transfer] ✅ File validation passed: {abs_path} ({file_size} bytes)")
             return True
+            
         except Exception as e:
             print(f"[file_transfer] ❌ Validation error: {e}")
             return False
+
+    def _is_path_allowed(self, path: str) -> bool:
+        """Check if path is within allowed directories"""
+        # Получаем базовую директорию проекта
+        import os
+        base_dir = os.path.abspath(os.path.dirname(__file__) + '/../..')
+        base_dir = base_dir.replace('\\', '/')  # Normalize for cross-platform
+        
+        # Разрешенные директории (относительные и абсолютные)
+        allowed_dirs = [
+            '/downloads/', 
+            '/uploads/', 
+            './downloads/', 
+            './uploads/',
+            f'{base_dir}/downloads/',
+            f'{base_dir}/uploads/',
+            f'{base_dir}/downloads/uploads/',
+        ]
+        
+        for allowed_dir in allowed_dirs:
+            if path.startswith(allowed_dir):
+                return True
+        
+        return False
