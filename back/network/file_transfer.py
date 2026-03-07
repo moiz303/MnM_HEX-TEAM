@@ -172,7 +172,7 @@ class FileTransferManager:
                     chunk_hash=chunk_hash,
                     chunk_size=len(data)
                 )
-                print(f"[file_transfer] created chunk {i}, size {len(data)}")
+                print(f"[file_transfer] created chunk {i}, size {len(data)}, hash {chunk_hash[:8]}...")
 
     def _send_chunks_loop(self, session: TransferSession):
         """Цикл отправки чанков с flow control"""
@@ -202,15 +202,15 @@ class FileTransferManager:
 
     def _send_chunk(self, session: TransferSession, chunk: ChunkInfo):
         """Отправка одного чанка"""
+        import base64
         session_key = self.crypto.get_session_key(session.file_info.receiver_id)
         if session_key:
             encrypted_data = self.crypto.encrypt_with_key(chunk.data, session_key)
-            data_hex = encrypted_data.hex()
-            print(f"[file_transfer] sending chunk {chunk.chunk_index}, original size {len(chunk.data)}, encrypted size {len(encrypted_data)}")
+            data_hex = base64.b64encode(encrypted_data).decode()
+            print(f"[file_transfer] sending chunk {chunk.chunk_index}, original size {len(chunk.data)}, encrypted size {len(encrypted_data)}, encoded size {len(data_hex)}")
         else:
-            import base64
             data_hex = base64.b64encode(chunk.data).decode()
-            print(f"[file_transfer] sending chunk {chunk.chunk_index}, size {len(chunk.data)}, using base64")
+            print(f"[file_transfer] sending chunk {chunk.chunk_index}, size {len(chunk.data)}, encoded size {len(data_hex)}, using base64")
 
         msg = create_message(
             MessageType.FILE_CHUNK,
@@ -220,6 +220,12 @@ class FileTransferManager:
             data=data_hex,
             checksum=chunk.chunk_hash
         )
+
+        import json
+        msg_size = len(json.dumps(msg).encode())
+        print(f"[file_transfer] chunk {chunk.chunk_index} message size: {msg_size} bytes")
+        if msg_size > 64000:
+            print(f"[file_transfer] ⚠️ WARNING: chunk {chunk.chunk_index} message exceeds 64KB threshold!")
 
         # use target_ip stored in session (should be the peer's IP)
         dest = session.target_ip or session.file_info.receiver_id
@@ -333,22 +339,27 @@ class FileTransferManager:
                 return
 
             try:
+                import base64
                 session_key = self.crypto.get_session_key(sender_id)
                 if session_key:
-                    encrypted_bytes = bytes.fromhex(chunk_data_hex)
+                    encrypted_bytes = base64.b64decode(chunk_data_hex)
                     decrypted_data = self.crypto.decrypt_with_key(encrypted_bytes, session_key)
                     print(f"[file_transfer] received chunk {chunk_index}, encrypted size {len(encrypted_bytes)}, decrypted size {len(decrypted_data)}")
                 else:
-                    import base64
                     decrypted_data = base64.b64decode(chunk_data_hex)
-                    print(f"[file_transfer] received chunk {chunk_index}, base64 size {len(chunk_data_hex)}, decoded size {len(decrypted_data)}")
+                    print(f"[file_transfer] received chunk {chunk_index}, base64 encoded size {len(chunk_data_hex)}, decoded size {len(decrypted_data)}")
             except Exception as e:
-                print(f"Decryption error: {e}")
+                print(f"[file_transfer] Decryption/decoding error for chunk {chunk_index}: {e}")
+                import traceback
+                traceback.print_exc()
                 return
 
             actual_hash = hashlib.sha256(decrypted_data).hexdigest()
             if actual_hash != chunk_hash:
-                print(f"Chunk hash mismatch: {chunk_index}")
+                print(f"[file_transfer] ❌ Chunk hash mismatch: {chunk_index}")
+                print(f"               Expected: {chunk_hash}")
+                print(f"               Got:      {actual_hash}")
+                print(f"               Data size: {len(decrypted_data)}")
                 return
 
             self._write_chunk(session.local_path, chunk_index, decrypted_data)
@@ -374,9 +385,11 @@ class FileTransferManager:
     def _write_chunk(self, file_path: str, chunk_index: int, data: bytes):
         """Запись чанка в файл по смещению"""
         offset = chunk_index * Limits.MAX_FILE_CHUNK
+        print(f"[file_transfer] writing chunk {chunk_index}, offset {offset}, size {len(data)}")
         with open(file_path, 'r+b') as f:
             f.seek(offset)
-            f.write(data)
+            bytes_written = f.write(data)
+            print(f"[file_transfer] wrote {bytes_written} bytes at offset {offset}")
 
     def handle_file_complete(self, data: dict, sender_id: str):
         """Обработка завершения передачи"""

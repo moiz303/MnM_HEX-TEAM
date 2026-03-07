@@ -63,10 +63,10 @@ class ConnectionManager:
             if self.on_message:
                 self.on_message(message, addr)
 
-        except json.JSONDecodeError:
-            print(f"Invalid JSON from {addr}")
+        except json.JSONDecodeError as e:
+            print(f"[connection] Invalid JSON from {addr}: {e}, data size: {len(data) if 'data' in locals() else 'unknown'}")
         except Exception as e:
-            print(f"Connection error: {e}")
+            print(f"[connection] Connection error from {addr}: {e}")
         finally:
             sock.close()
 
@@ -78,13 +78,19 @@ class ConnectionManager:
             True если успешно, False если пир недоступен
         """
         try:
+            import json
+            json_data = json.dumps(data).encode()
+            if len(json_data) > Limits.MAX_MESSAGE_SIZE:
+                print(f"[connection] Message to {ip} too large: {len(json_data)} > {Limits.MAX_MESSAGE_SIZE}")
+                return False
+
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(Timeouts.CONNECTION)
                 sock.connect((ip, MESSAGE_PORT))
-                sock.sendall(json.dumps(data).encode())
+                sock.sendall(json_data)
                 return True
         except (socket.timeout, ConnectionRefusedError):
             return False
         except Exception as e:
-            print(f"Send error to {ip}: {e}")
+            print(f"[connection] Send error to {ip}: {e}")
             return False
