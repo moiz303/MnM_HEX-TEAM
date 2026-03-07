@@ -30,9 +30,8 @@ class OnionRouter:
         return False
 
     def send_file(self, target_ip: str, file_path: str, receiver_device_id: str) -> str:
+        # For now, always send directly by IP. Relay logic can be added later.
         circuit_id = None
-        if not self.connection_manager.is_peer_connected(target_ip):
-            circuit_id = self.relay_manager.create_mesh_circuit(receiver_device_id)
         return self.file_manager.send_file(target_ip, file_path, receiver_device_id, circuit_id)
 
     def handle_incoming(self, msg_type, data: dict, sender_id: str):

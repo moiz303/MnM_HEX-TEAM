@@ -345,14 +345,36 @@ function sendMessage() {
                     });
 
                     if (res && res.upload_id) {
-                        // send file via P2P
-                        fetch('/api/send_uploaded_file', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
-                        }).catch((err) => {
+                        // try P2P send
+                        try {
+                            const sendRes = await fetch('/api/send_uploaded_file', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ upload_id: res.upload_id, peer: activePeer.username })
+                            });
+                            if (!sendRes.ok) {
+                                console.warn('P2P send failed, falling back to link');
+                                // fallback to sending link stored in res.file_url
+                                if (res.file_url) {
+                                    const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                                    fetch('/api/send_message', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                                    }).catch(() => {});
+                                }
+                            }
+                        } catch (err) {
                             console.error('Send file failed', err);
-                        });
+                            if (res.file_url) {
+                                const fileMsg = `📎 ${file.name} ${res.file_url}`;
+                                fetch('/api/send_message', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ peer: activePeer.username, text: fileMsg })
+                                }).catch(() => {});
+                            }
+                        }
                     }
                 } catch (err) {
                     console.error('Upload failed', err);

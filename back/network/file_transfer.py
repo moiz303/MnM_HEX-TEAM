@@ -46,6 +46,10 @@ class TransferSession:
     status: str = 'pending'
     direction: str = 'upload'
     local_path: Optional[str] = None
+    # store IP address of the peer (used for sending chunks/acks)
+    target_ip: Optional[str] = None
+    # for downloads, remember sender IP separately
+    sender_ip: Optional[str] = None
     chunks: Dict[int, ChunkInfo] = field(default_factory=dict)
     completed_chunks: List[int] = field(default_factory=list)
     failed_chunks: List[int] = field(default_factory=list)
@@ -124,8 +128,10 @@ class FileTransferManager:
             status='pending',
             direction='upload',
             local_path=file_path,
-            circuit_id=circuit_id
+            circuit_id=circuit_id,
+            target_ip=receiver_ip
         )
+        print(f"[file_transfer] initialized upload session {transfer_id} to {receiver_ip} device={receiver_device_id}")
 
         with self.transfer_lock:
             self.active_transfers[transfer_id] = session
@@ -146,6 +152,7 @@ class FileTransferManager:
             })
         )
 
+        # send initial offer using the IP address
         self._send_to_peer(receiver_ip, offer_msg, circuit_id)
         session.status = 'in_progress'
         session.started_at = time.time()
@@ -211,7 +218,10 @@ class FileTransferManager:
             checksum=chunk.chunk_hash
         )
 
-        self._send_to_peer(session.file_info.receiver_id, msg, session.circuit_id)
+        # use target_ip stored in session (should be the peer's IP)
+        dest = session.target_ip or session.file_info.receiver_id
+        print(f"[file_transfer] sending chunk {chunk.chunk_index} to {dest}")
+        self._send_to_peer(dest, msg, session.circuit_id)
         chunk.sent_at = time.time()
 
         ack_event = threading.Event()
@@ -228,14 +238,19 @@ class FileTransferManager:
             if ack_key in self.pending_acks:
                 del self.pending_acks[ack_key]
 
-    def _send_to_peer(self, peer_id: str, msg: dict, circuit_id: Optional[str] = None):
-        """Отправка через роутер или напрямую"""
+    def _send_to_peer(self, peer_ip: str, msg: dict, circuit_id: Optional[str] = None):
+        """Send a message to a peer IP (ignores device_id confusion).
+        Circuit_id is currently only used for relaying; router logic is minimal.
+        """
         if circuit_id and self.router:
-            self.router.relay_manager.send_via_relay(circuit_id, msg)
-        elif self.router:
-            self.router.send_message(peer_id, msg)
+            # forward through relay network if a circuit exists
+            try:
+                self.router.relay_manager.handle_relay_data(circuit_id, msg, 'local')
+            except Exception as e:
+                print(f"Relay send error: {e}")
         else:
-            self.conn_mgr.send_message(peer_id, msg)
+            # always send directly by IP
+            self.conn_mgr.send_to_peer(peer_ip, msg)
 
     def handle_file_offer(self, data: dict, sender_id: str):
         """Обработка предложения файла"""
@@ -259,7 +274,8 @@ class FileTransferManager:
             ),
             status='pending',
             direction='download',
-            local_path=str(self.download_dir / filename)
+            local_path=str(self.download_dir / filename),
+            sender_ip=sender_id
         )
 
         with self.transfer_lock:
@@ -268,6 +284,8 @@ class FileTransferManager:
         print(f"📥 File offer received: {filename} ({file_size} bytes) from {sender_id}")
         if self.on_file_offer:
             self.on_file_offer(session)
+        # automatically accept for now
+        print(f"[file_transfer] auto-accepting file {file_id}")
         self.accept_file(file_id)
 
     def accept_file(self, transfer_id: str) -> bool:
@@ -289,7 +307,11 @@ class FileTransferManager:
             port=5000
         )
 
-        self._send_to_peer(session.file_info.sender_id, msg, None)
+        # send ack/accept using stored sender IP
+        if session.sender_ip:
+            self._send_to_peer(session.sender_ip, msg, None)
+        else:
+            self._send_to_peer(session.file_info.sender_id, msg, None)
         return True
 
     def handle_file_chunk(self, data: dict, sender_id: str):
@@ -380,7 +402,8 @@ class FileTransferManager:
                     file_id=session.transfer_id,
                     chat_id=session.file_info.receiver_id
                 )
-                self._send_to_peer(session.file_info.receiver_id, msg, session.circuit_id)
+                dest = session.target_ip or session.file_info.receiver_id
+                self._send_to_peer(dest, msg, session.circuit_id)
 
             if self.on_complete:
                 self.on_complete(session.transfer_id, session.status)

@@ -94,7 +94,8 @@ class SecureMessenger:
                 self._handle_secure_message(data, addr)
             elif msg_type in [MessageType.FILE_OFFER, MessageType.FILE_ACCEPT, MessageType.FILE_CHUNK, MessageType.FILE_COMPLETE, MessageType.FILE_REJECT, MessageType.FILE_ERROR]:
                 print(f"\n📁 Получено FILE сообщение: {msg_type} от {addr[0]}")
-                self.router.handle_incoming(msg_type, data, data.get('from', addr[0]))
+                # always forward IP address for file routing
+                self.router.handle_incoming(msg_type, data, addr[0])
             else:
                 print(f"\n❓ Неизвестный тип сообщения: {msg_type}")
         except Exception as e:

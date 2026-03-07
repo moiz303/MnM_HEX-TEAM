@@ -297,6 +297,9 @@ def create_app():
     os.makedirs(TMP_ROOT, exist_ok=True)
     os.makedirs(UPLOAD_ROOT, exist_ok=True)
 
+    # keep mapping of upload_id -> file path to avoid glob issues
+    uploads_map = {}
+
     @app.route('/api/upload/init', methods=['POST'])
     def api_upload_init():
         data = request.get_json(force=True) or {}
@@ -388,6 +391,9 @@ def create_app():
         except Exception:
             pass
 
+        # record mapping so send_uploaded_file can find it easily
+        uploads_map[upload_id] = out_path
+
         file_url = f"/uploads/{out_name}"
         return jsonify({'file_url': file_url, 'filename': safe_name, 'upload_id': upload_id}), 200
 
@@ -411,24 +417,31 @@ def create_app():
         data = request.get_json(force=True) or {}
         upload_id = data.get('upload_id')
         peer = data.get('peer')
+        print(f"[web] send_uploaded_file called with upload_id={upload_id}, peer={peer}")
         if not upload_id or not peer:
+            print(f"[web] missing data")
             return jsonify({'error': 'upload_id and peer required'}), 400
 
-        # Find the file path from upload_id
-        # Since we don't store meta after complete, assume the file is named with upload_id
-        # Actually, out_name = f"{upload_id}_{safe_name}", but we need to find it
-        # Better to modify complete to return the full path or store it
-
-        # For now, list files in UPLOAD_ROOT that start with upload_id
-        import glob
-        pattern = os.path.join(UPLOAD_ROOT, f"{upload_id}_*")
-        matches = glob.glob(pattern)
-        if not matches:
-            return jsonify({'error': 'file not found'}), 404
-        file_path = matches[0]  # assume one
+        # lookup path from map first
+        file_path = uploads_map.get(upload_id)
+        if not file_path or not os.path.exists(file_path):
+            # fallback to scanning directory
+            import glob
+            pattern = os.path.join(UPLOAD_ROOT, f"{upload_id}_*")
+            print(f"[web] scanning with pattern {pattern}")
+            matches = glob.glob(pattern)
+            if not matches:
+                print(f"[web] file not found for upload_id {upload_id}")
+                return jsonify({'error': 'file not found'}), 404
+            file_path = matches[0]
+            uploads_map[upload_id] = file_path
+        else:
+            print(f"[web] found file_path {file_path} via map")
 
         # Now call send_file
+        print(f"[web] calling send_file peer={peer} path={file_path}")
         res, code = call_handler('send_file', {'peer': peer, 'file_path': file_path})
+        print(f"[web] send_file result {res} code {code}")
         return jsonify(res), code
 
     return app
