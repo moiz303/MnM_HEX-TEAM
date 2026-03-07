@@ -323,6 +323,9 @@ class FileTransferManager:
             data=data_hex,
             checksum=chunk.chunk_hash
         )
+        
+        # Store msg_id in chunk for ACK matching
+        chunk.msg_id = msg.get('msg_id')
 
         import json
         msg_size = len(json.dumps(msg).encode())
@@ -517,18 +520,17 @@ class FileTransferManager:
         with self.transfer_lock:
             for transfer_id, session in self.active_transfers.items():
                 if session.direction == 'upload':
-                    # Check if this ACK matches any of our sent chunks
+                    # Check each chunk to find the one with matching msg_id
                     for chunk_index, chunk in session.chunks.items():
-                        if chunk_index not in session.completed_chunks:
-                            # This might be the ACK for this chunk
-                            ack_key = f"{transfer_id}:{chunk_index}"
-                            if ack_key in self.pending_acks:
+                        if hasattr(chunk, 'msg_id') and chunk.msg_id == in_response_to:
+                            if chunk_index not in session.completed_chunks:
                                 print(f"[file_transfer] ✅ ACK received for chunk {chunk_index} of transfer {transfer_id}")
                                 session.completed_chunks.append(chunk_index)
                                 session.bytes_transferred += chunk.chunk_size
                                 self.stats['bytes_sent'] += chunk.chunk_size
                                 
-                                # Signal the waiting thread
+                                # Signal ACK for this chunk
+                                ack_key = f"{transfer_id}:{chunk_index}"
                                 if ack_key in self.pending_acks:
                                     self.pending_acks[ack_key].set()
                                     del self.pending_acks[ack_key]
@@ -537,6 +539,7 @@ class FileTransferManager:
                                 if len(session.completed_chunks) >= session.file_info.chunk_count:
                                     self._finalize_transfer(session, success=True)
                                 return
+                            break  # Found matching chunk, no need to check others
 
     def handle_file_chunk(self, data: dict, sender_id: str):
         """Обработка входящего чанка с улучшенной валидацией"""

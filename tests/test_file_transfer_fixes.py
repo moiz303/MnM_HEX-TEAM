@@ -189,6 +189,7 @@ def test_delivery_receipt_handling():
             chunk_hash='hash1',
             chunk_size=10
         )
+        chunk1.msg_id = 'msg_123'  # Add msg_id for ACK matching
         
         chunk2 = ChunkInfo(
             chunk_index=1,
