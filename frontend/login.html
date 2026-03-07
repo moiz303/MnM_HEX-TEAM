@@ -3,64 +3,169 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Secure P2P Messenger - безопасный мессенджер с шифрованием">
+    <meta name="theme-color" content="#00d9ff">
     <title>Вход в Secure Messenger</title>
     <link rel="stylesheet" href="/css/styles.css">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300d9ff'><circle cx='12' cy='12' r='10' stroke='%2300d9ff' stroke-width='2' fill='none'/><path d='M12 2L12 12L20 20' stroke='%2300d9ff' stroke-width='2' stroke-linecap='round'/></svg>">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300d9ff'><circle cx='12' cy='12' r='10' stroke='%2300d9ff' stroke-width='2' fill='none'/><path d='M12 2L12 12L20 20' stroke='%2300d9ff' stroke-width='2' stroke-linecap='round'/></svg>">
     <style>
         .login-container {
             max-width: 400px;
             margin: 100px auto;
             padding: 40px;
             background: var(--color-surface);
-            border-radius: var(--radius-lg);
+            border-radius: 12px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        @media (max-width: 768px) {
+            .login-container {
+                margin: 20px auto;
+                padding: 24px;
+                max-width: calc(100% - 40px);
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .login-container {
+                margin: 0;
+                padding: 20px;
+                border-radius: 0;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+            }
         }
         
         .login-title {
             text-align: center;
             margin-bottom: 30px;
             color: var(--color-text);
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        @media (max-width: 480px) {
+            .login-title {
+                font-size: 20px;
+                margin-bottom: 20px;
+            }
         }
         
         .login-input {
             width: 100%;
             padding: 12px 16px;
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-md);
+            border: 1px solid var(--color-gray-300);
+            border-radius: 8px;
+            font-size: 16px;
             margin-bottom: 20px;
-            transition: all var(--duration-normal) var(--ease-standard);
+            transition: all 0.25s ease;
+            background: var(--color-background);
+            color: var(--color-text);
+        }
+        
+        @media (max-width: 480px) {
+            .login-input {
+                padding: 14px 16px;
+                font-size: 16px; /* Предотвращаем zoom в iOS */
+            }
         }
         
         .login-input:focus {
             outline: none;
-            border-color: var(--color-primary);
-            box-shadow: var(--focus-ring);
+            border-color: var(--color-teal-500);
+            box-shadow: 0 0 0 3px rgba(50, 184, 198, 0.4);
         }
         
         .login-button {
             width: 100%;
             padding: 12px 24px;
-            background: var(--gradient-primary);
-            color: var(--color-btn-primary-text);
+            background: linear-gradient(135deg, var(--color-teal-500), var(--color-teal-600));
+            color: white;
             border: none;
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-md);
-            font-weight: var(--font-weight-medium);
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all var(--duration-normal) var(--ease-standard);
+            transition: all 0.25s ease;
+        }
+        
+        @media (max-width: 480px) {
+            .login-button {
+                padding: 14px 24px;
+                font-size: 16px; /* Предотвращаем zoom в iOS */
+            }
         }
         
         .login-button:hover {
-            background: var(--color-primary-hover);
+            background: linear-gradient(135deg, var(--color-teal-600), var(--color-teal-700));
+            transform: translateY(-1px);
+        }
+        
+        .login-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
         
         .login-info {
             margin-top: 20px;
             padding: 15px;
-            background: var(--color-bg-1);
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
+            background: rgba(59, 130, 246, 0.08);
+            border-radius: 8px;
+            font-size: 14px;
             color: var(--color-text-secondary);
+        }
+        
+        @media (max-width: 480px) {
+            .login-info {
+                font-size: 13px;
+                padding: 12px;
+                margin-top: 16px;
+            }
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .error-message {
+            color: var(--color-red-500);
+            font-size: 14px;
+            margin-top: -16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        
+        .success-message {
+            color: var(--color-teal-500);
+            font-size: 14px;
+            margin-top: -16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        
+        @media (max-width: 480px) {
+            .error-message,
+            .success-message {
+                font-size: 13px;
+                margin-top: -12px;
+                margin-bottom: 12px;
+            }
         }
     </style>
 </head>
@@ -69,6 +174,9 @@
         <h1 class="login-title">🔐 Secure P2P Messenger</h1>
         
         <form id="loginForm">
+            <div class="error-message" id="error-message"></div>
+            <div class="success-message" id="success-message"></div>
+            
             <input 
                 type="text" 
                 id="username" 
@@ -80,8 +188,8 @@
                 title="Имя может содержать буквы, цифры и подчеркивания"
             >
             
-            <button type="submit" class="login-button">
-                Войти в чат
+            <button type="submit" class="login-button" id="login-button">
+                <span id="button-text">Войти в чат</span>
             </button>
         </form>
         
@@ -94,27 +202,103 @@
     </div>
 
     <script>
-        // Auto-save username from server if already set
-        fetch('/api/auto_save_username')
-            .then(response => response.json())
-            .then(data => {
-                if (data.success && data.username !== 'user') {
-                    localStorage.setItem('messenger_username', data.username);
-                    document.getElementById('username').value = data.username;
-                }
-            })
-            .catch(error => {
-                console.log('Could not auto-fetch username');
-            });
-        
+        // Элементы для сообщений
+        const errorMessage = document.getElementById('error-message');
+        const successMessage = document.getElementById('success-message');
+        const loginButton = document.getElementById('login-button');
+        const buttonText = document.getElementById('button-text');
+        const usernameInput = document.getElementById('username');
+
+        // Функции для показа сообщений
+        function showError(text) {
+            errorMessage.textContent = text;
+            errorMessage.style.display = 'block';
+            successMessage.style.display = 'none';
+        }
+
+        function showSuccess(text) {
+            successMessage.textContent = text;
+            successMessage.style.display = 'block';
+            errorMessage.style.display = 'none';
+        }
+
+        function hideMessages() {
+            errorMessage.style.display = 'none';
+            successMessage.style.display = 'none';
+        }
+
+        // Функция загрузки
+        function setLoading(loading) {
+            if (loading) {
+                loginButton.disabled = true;
+                buttonText.innerHTML = '<span class="loading"></span>Вход...';
+            } else {
+                loginButton.disabled = false;
+                buttonText.textContent = 'Войти в чат';
+            }
+        }
+
+        // Валидация в реальном времени
+        usernameInput.addEventListener('input', () => {
+            hideMessages();
+            const value = usernameInput.value.trim();
+            
+            if (value.length > 20) {
+                showError('Имя слишком длинное (максимум 20 символов)');
+            } else if (!/^[A-Za-zА-Яа-я0-9_]+$/.test(value) && value.length > 0) {
+                showError('Имя может содержать только буквы, цифры и подчеркивания');
+            }
+        });
+
+        // Инициализация - проверяем сохраненное имя
+        function initUsername() {
+            const savedUsername = localStorage.getItem('messenger_username');
+            if (savedUsername) {
+                usernameInput.value = savedUsername;
+            }
+            
+            // Пробуем получить имя с сервера
+            fetch('/api/auto_save_username')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.username !== 'user') {
+                        localStorage.setItem('messenger_username', data.username);
+                        usernameInput.value = data.username;
+                    }
+                })
+                .catch(error => {
+                    // Не показываем ошибку пользователю, просто логируем
+                    console.log('Could not auto-fetch username');
+                });
+        }
+
+        // Обработка формы
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const username = document.getElementById('username').value.trim();
+            const username = usernameInput.value.trim();
+            
+            // Валидация
             if (!username) {
-                alert('Пожалуйста, введите имя');
+                showError('Пожалуйста, введите имя');
+                usernameInput.focus();
                 return;
             }
+            
+            if (username.length > 20) {
+                showError('Имя слишком длинное (максимум 20 символов)');
+                usernameInput.focus();
+                return;
+            }
+            
+            if (!/^[A-Za-zА-Яа-я0-9_]+$/.test(username)) {
+                showError('Имя может содержать только буквы, цифры и подчеркивания');
+                usernameInput.focus();
+                return;
+            }
+            
+            setLoading(true);
+            hideMessages();
             
             try {
                 // Сохраняем имя в localStorage
@@ -130,25 +314,24 @@
                 const result = await response.json();
                 
                 if (response.ok) {
-                    alert(`✅ ${result.message}`);
+                    showSuccess(`✅ ${result.message}`);
                     // Перенаправляем на главную страницу через 1 секунду
                     setTimeout(() => {
                         window.location.href = '/';
                     }, 1000);
                 } else {
-                    alert(`❌ Ошибка: ${result.error}`);
+                    showError(`❌ ${result.error}`);
+                    setLoading(false);
                 }
             } catch (error) {
                 console.error('Error:', error);
-                alert('Произошла ошибка. Попробуйте снова.');
+                showError('Произошла ошибка. Попробуйте снова.');
+                setLoading(false);
             }
         });
-        
-        // Проверяем, есть ли сохраненное имя
-        const savedUsername = localStorage.getItem('messenger_username');
-        if (savedUsername) {
-            document.getElementById('username').value = savedUsername;
-        }
+
+        // Инициализация при загрузке
+        initUsername();
     </script>
 </body>
 </html>

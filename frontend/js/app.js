@@ -18,6 +18,84 @@ if (!localStorage.getItem('messenger_username')) {
     throw new Error('Redirecting to login page');
 }
 
+// Система уведомлений
+class NotificationSystem {
+    constructor() {
+        this.container = document.getElementById('notification-container');
+    }
+
+    show(message, type = 'info', duration = 5000) {
+        const notification = document.createElement('div');
+        notification.className = `notification ${type}`;
+        
+        const icon = this.getIcon(type);
+        const content = document.createElement('div');
+        content.className = 'notification-content';
+        content.textContent = message;
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'notification-close';
+        closeBtn.innerHTML = '×';
+        closeBtn.onclick = () => this.hide(notification);
+        
+        notification.appendChild(icon);
+        notification.appendChild(content);
+        notification.appendChild(closeBtn);
+        
+        this.container.appendChild(notification);
+        
+        // Автоматическое скрытие
+        if (duration > 0) {
+            setTimeout(() => this.hide(notification), duration);
+        }
+        
+        return notification;
+    }
+    
+    getIcon(type) {
+        const icon = document.createElement('div');
+        icon.className = 'notification-icon';
+        
+        const icons = {
+            success: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17L4 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+            error: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+            warning: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 9V13M12 17H12.01M5.07183 19H18.9282C19.5052 19 19.9282 18.577 19.9282 18V7.00001C19.9282 6.42301 19.5052 6.00001 18.9282 6.00001H5.07183C4.49483 6.00001 4.07183 6.42301 4.07183 7.00001V18C4.07183 18.577 4.49483 19 5.07183 19Z" stroke="currentColor" stroke-width="2"/></svg>',
+            info: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M13 16H12V12H11M12 8H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" stroke-width="2"/></svg>'
+        };
+        
+        icon.innerHTML = icons[type] || icons.info;
+        return icon;
+    }
+    
+    hide(notification) {
+        notification.classList.add('hide');
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }
+    
+    success(message, duration) {
+        return this.show(message, 'success', duration);
+    }
+    
+    error(message, duration) {
+        return this.show(message, 'error', duration);
+    }
+    
+    warning(message, duration) {
+        return this.show(message, 'warning', duration);
+    }
+    
+    info(message, duration) {
+        return this.show(message, 'info', duration);
+    }
+}
+
+// Глобальная система уведомлений
+const notifications = new NotificationSystem();
+
 const peersList = document.getElementById('peers-list');
 const messagesArea = document.getElementById('messages-area');
 const messageInput = document.getElementById('message-input');
@@ -35,7 +113,12 @@ function changeUsername() {
         const username = newUsername.trim();
         
         if (username.length > 20) {
-            alert('Имя слишком длинное (максимум 20 символов)');
+            notifications.error('Имя слишком длинное (максимум 20 символов)');
+            return;
+        }
+        
+        if (!/^[A-Za-zА-Яа-я0-9_]+$/.test(username)) {
+            notifications.error('Имя может содержать только буквы, цифры и подчеркивания');
             return;
         }
         
@@ -49,16 +132,16 @@ function changeUsername() {
             if (result.success) {
                 currentUsername = username;
                 localStorage.setItem('messenger_username', username);
-                alert(`✅ Имя изменено на: ${username}`);
+                notifications.success(`Имя изменено на: ${username}`);
                 // Обновляем интерфейс если нужно
                 updateHeader();
             } else {
-                alert(`❌ Ошибка: ${result.error}`);
+                notifications.error(`Ошибка: ${result.error}`);
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            alert('Произошла ошибка. Попробуйте снова.');
+            notifications.error('Произошла ошибка. Попробуйте снова.');
         });
     }
 }
@@ -428,7 +511,7 @@ async function startVideoCall() {
     if (!activePeer) return;
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert('Браузер не поддерживает доступ к камере');
+        notifications.error('Браузер не поддерживает доступ к камере');
         return;
     }
 
@@ -466,11 +549,11 @@ async function startVideoCall() {
         }, 4000);
     } catch (error) {
         if (error.name === 'NotAllowedError') {
-            alert('Доступ к камере запрещён');
+            notifications.error('Доступ к камере запрещён');
         } else if (error.name === 'NotFoundError') {
-            alert('Камера не найдена');
+            notifications.error('Камера не найдена');
         } else {
-            alert('Не удалось получить доступ к камере');
+            notifications.error('Не удалось получить доступ к камере');
         }
     }
 }
