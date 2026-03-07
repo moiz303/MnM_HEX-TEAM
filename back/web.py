@@ -202,40 +202,87 @@ def create_app():
                     username = params.get('username')
                     ip = params.get('ip')
                     
-                    # Используем IP для start_chat, но сохраняем chat_id для username
-                    ok = messenger.start_chat(ip or username)
-                    if ok:
-                        # Ждем больше времени для handshake
-                        import time
-                        time.sleep(5)
-                        
-                        # Debug: покажем все active_chats
-                        print(f"[DEBUG] Active chats after handshake: {messenger.active_chats}")
-                        
-                        # Ищем chat_id в active_chats
-                        chat_id = None
-                        for key, value in messenger.active_chats.items():
-                            print(f"[DEBUG] Checking key: {key}, value: {value}")
-                            if key == ip or key == username:
-                                chat_id = value
-                                print(f"[DEBUG] Found chat_id: {chat_id}")
-                                break
-                        
-                        # Если нашли chat_id, сохраняем его и для username
-                        if chat_id and username:
-                            messenger.active_chats[username] = chat_id
-                            print(f"[DEBUG] Saved chat_id for username: {username}")
+                    # Ищем пира по имени или IP
+                    peer = None
+                    if username:
+                        peer = messenger.discovery.get_peer_by_name(username)
+                        if peer:
+                            peer_ip, peer_info = peer
+                            print(f"[DEBUG] Found peer by name: {username} -> {peer_ip}")
                         else:
-                            print(f"[DEBUG] No chat_id found for ip={ip}, username={username}")
+                            print(f"[DEBUG] Peer not found by name: {username}")
+                    
+                    # Если не нашли по имени, пробуем по IP
+                    if not peer and ip:
+                        all_peers = messenger.discovery.get_all_peers()
+                        if ip in all_peers:
+                            peer_ip = ip
+                            peer_info = all_peers[ip]
+                            username = peer_info.get('username', username)
+                            print(f"[DEBUG] Found peer by IP: {ip} -> {username}")
+                        else:
+                            print(f"[DEBUG] Peer not found by IP: {ip}")
+                    
+                    if not peer and not peer_ip:
+                        raise ValueError(f'peer {username or ip} not found')
+                    
+                    # Используем правильное имя для start_chat
+                    ok = messenger.start_chat(username or peer_ip)
+                    if ok:
+                        print(f"[DEBUG] Handshake sent successfully")
+                        
+                        # Ждем немного для завершения handshake
+                        import time
+                        time.sleep(2)
+                        
+                        # Проверяем есть ли реальный chat_id после handshake
+                        real_chat_id = messenger.active_chats.get(username)
+                        if real_chat_id and not real_chat_id.startswith('temp_'):
+                            print(f"[DEBUG] Found real chat_id: {real_chat_id}")
+                            chat_id = real_chat_id
+                        else:
+                            # Создаем временный chat_id если реальный не появился
+                            temp_chat_id = f"chat_{username}_{int(time.time())}"
+                            messenger.active_chats[username] = temp_chat_id
+                            chat_id = temp_chat_id
+                            print(f"[DEBUG] Created temp chat_id: {chat_id}")
+                        
+                        print(f"[DEBUG] Final chat_id: {chat_id}")
+                        print(f"[DEBUG] Active chats: {messenger.active_chats}")
                         
                         return {'status': 'handshake_initiated', 'chat_id': chat_id}, 200
                     else:
-                        raise ValueError('start failed')
+                        # Проверяем конкретную причину ошибки
+                        peer = messenger.discovery.get_peer_by_name(username or peer_ip)
+                        if peer and not peer[1].get('public_key'):
+                            return {'error': 'no_public_key', 'message': f'Нет публичного ключа для {username}. Дождитесь broadcast от пира.'}, 400
+                        else:
+                            raise ValueError('start failed')
 
                 if name == 'send_message':
                     peer = params.get('peer')
                     text = params.get('text')
-                    ok = messenger.send_message(peer, text)
+                    
+                    # Ищем правильный адрес для отправки - пробуем username, потом IP
+                    send_to = peer
+                    chat_id = messenger.active_chats.get(peer)
+                    
+                    if not chat_id:
+                        # Пробуем найти по IP если peer - это username
+                        for ip, info in messenger.discovery.get_all_peers().items():
+                            if info.get('username') == peer:
+                                send_to = ip
+                                chat_id = messenger.active_chats.get(ip)
+                                break
+                    
+                    # Если все еще нет chat_id, создаем временный
+                    if not chat_id:
+                        print(f"[DEBUG] No chat_id found for {peer}, creating temp")
+                        messenger.active_chats[peer] = f"temp_{peer}_{int(time.time())}"
+                        chat_id = messenger.active_chats[peer]
+                    
+                    print(f"[DEBUG] Sending to: {send_to}, chat_id: {chat_id}")
+                    ok = messenger.send_message(peer, text)  # Отправляем с username, не с IP
                     if ok:
                         return {'status': 'sent', 'timestamp': time.time()}, 200
                     else:

@@ -310,7 +310,7 @@ async function selectPeerByUsername(username) {
                 method: 'POST', 
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    username: activePeer.ip || activePeer.username,
+                    username: activePeer.username,
                     ip: activePeer.ip 
                 })
             });

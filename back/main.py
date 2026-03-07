@@ -263,6 +263,14 @@ class SecureMessenger:
         print(f"   IP: {ip}")
         print(f"   Device ID: {info['device_id']}")
 
+        # Проверяем наличие публичного ключа пира
+        if not info.get('public_key'):
+            print(f"❌ Нет публичного ключа для {peer_name}")
+            print(f"   💡 Дождитесь broadcast от пира или проверьте соединение")
+            return False
+        
+        print(f"   ✅ Публичный ключ найден")
+
         # Создаём handshake сообщение
         handshake_msg = self.handshake.initiate(
             peer_name, ip, info['device_id']
