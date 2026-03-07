@@ -5,6 +5,99 @@ let messages = {};
 let selectedFiles = []; // array of {file, uid}
 let messagesPollInterval = null;
 
+// Function to deselect current peer
+function deselectPeer() {
+    activePeer = null;
+    stopMessagePolling();
+    renderMessages();
+    renderPeers();
+    updateHeader();
+}
+
+// Function to stop message polling
+function stopMessagePolling() {
+    if (messagesPollInterval) {
+        clearInterval(messagesPollInterval);
+        messagesPollInterval = null;
+        console.log('Message polling stopped');
+    }
+}
+
+// Function to start message polling only if there's an active peer
+function startMessagePolling() {
+    stopMessagePolling(); // Clear any existing interval
+    
+    if (activePeer) {
+        messagesPollInterval = setInterval(async () => {
+            // Check if we still have an active peer, if not stop polling
+            if (!activePeer) {
+                stopMessagePolling();
+                return;
+            }
+            
+            try {
+                // Пробуем сначала по username, потом по IP
+                const url = new URL('/api/get_messages', window.location.origin);
+                url.searchParams.set('peer', activePeer.username);
+                const r = await fetch(url);
+                if (r.ok) {
+                    const data = await r.json();
+                    if (data.messages && data.messages.length > 0) {
+                        const mapped = data.messages.map(m => ({
+                            id: m.msg_id || m.id || Math.random().toString(36).substr(2, 9),
+                            from: m.from || 'unknown',
+                            text: m.text || '',
+                            time: m.time || new Date(m.timestamp * 1000).toISOString(),
+                            sent: m.from === currentUsername || m.from === 'me'
+                        }));
+                        
+                        const existing = messages[activePeer.username] || [];
+                        const existingIds = new Set(existing.map(x => x.id));
+                        const newMessages = mapped.filter(x => !existingIds.has(x.id));
+                        
+                        if (newMessages.length > 0) {
+                            const merged = existing.concat(newMessages);
+                            merged.sort((a, b) => a.time.localeCompare(b.time));
+                            messages[activePeer.username] = merged;
+                            renderMessages();
+                        }
+                    }
+                } else {
+                    // Если не получилось по username, пробуем по IP
+                    const url2 = new URL('/api/get_messages', window.location.origin);
+                    url2.searchParams.set('peer', activePeer.ip);
+                    const r2 = await fetch(url2);
+                    if (r2.ok) {
+                        const data = await r2.json();
+                        if (data.messages && data.messages.length > 0) {
+                            const mapped = data.messages.map(m => ({
+                                id: m.msg_id || m.id || Math.random().toString(36).substr(2, 9),
+                                from: m.from || 'unknown',
+                                text: m.text || '',
+                                time: m.time || new Date(m.timestamp * 1000).toISOString(),
+                                sent: m.from === currentUsername || m.from === 'me'
+                            }));
+                            
+                            const existing = messages[activePeer.username] || [];
+                            const existingIds = new Set(existing.map(x => x.id));
+                            const newMessages = mapped.filter(x => !existingIds.has(x.id));
+                            
+                            if (newMessages.length > 0) {
+                                const merged = existing.concat(newMessages);
+                                merged.sort((a, b) => a.time.localeCompare(b.time));
+                                messages[activePeer.username] = merged;
+                                renderMessages();
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load messages:', e);
+            }
+        }, 2000); // Poll every 2 seconds to reduce server load
+    }
+}
+
 // Username management
 let currentUsername = localStorage.getItem('messenger_username') || 'user';
 
@@ -350,64 +443,16 @@ async function selectPeerByUsername(username) {
     messagesArea.querySelector('.empty-state')?.remove();
 
     // start polling messages for this peer
-    if (messagesPollInterval) clearInterval(messagesPollInterval);
-    messagesPollInterval = setInterval(async () => {
-        try {
-            // Пробуем сначала по username, потом по IP
-            const url = new URL('/api/get_messages', window.location.origin);
-            url.searchParams.set('peer', activePeer.username);
-            const r = await fetch(url);
-            if (r.ok) {
-                const data = await r.json();
-                if (data.messages && data.messages.length > 0) {
-                    const mapped = data.messages.map(m => ({
-                        id: m.id || Math.random().toString(36).substr(2, 9),
-                        from: m.from || 'unknown',
-                        text: m.text || '',
-                        time: m.time || new Date().toISOString(),
-                        sent: m.from === currentUsername
-                    }));
-                    
-                    const existing = messages[activePeer.username] || [];
-                    const existingIds = new Set(existing.map(x => x.id));
-                    const merged = existing.concat(mapped.filter(x => !existingIds.has(x.id)));
-                    merged.sort((a, b) => a.time.localeCompare(b.time));
-                    messages[activePeer.username] = merged;
-                    renderMessages();
-                }
-            } else {
-                // Если не получилось по username, пробуем по IP
-                const url2 = new URL('/api/get_messages', window.location.origin);
-                url2.searchParams.set('peer', activePeer.ip);
-                const r2 = await fetch(url2);
-                if (r2.ok) {
-                    const data = await r2.json();
-                    if (data.messages && data.messages.length > 0) {
-                        const mapped = data.messages.map(m => ({
-                            id: m.id || Math.random().toString(36).substr(2, 9),
-                            from: m.from || 'unknown',
-                            text: m.text || '',
-                            time: m.time || new Date().toISOString(),
-                            sent: m.from === currentUsername
-                        }));
-                        
-                        const existing = messages[activePeer.username] || [];
-                        const existingIds = new Set(existing.map(x => x.id));
-                        const merged = existing.concat(mapped.filter(x => !existingIds.has(x.id)));
-                        merged.sort((a, b) => a.time.localeCompare(b.time));
-                        messages[activePeer.username] = merged;
-                        renderMessages();
-                    }
-                }
-            }
-        } catch (e) {
-            console.error('Failed to load messages:', e);
-        }
-    }, 1000);
+    startMessagePolling();
 }
 
 function updateHeader() {
-    if (!activePeer) return;
+    if (!activePeer) {
+        headerAvatar.innerHTML = '<span>?</span>';
+        headerName.textContent = 'Выберите собеседника';
+        headerStatus.textContent = '';
+        return;
+    }
 
     headerAvatar.innerHTML = `
         <span>${getInitials(activePeer.username)}</span>
@@ -418,7 +463,15 @@ function updateHeader() {
 }
 
 function renderMessages() {
-    if (!activePeer || !messages[activePeer.username]) return;
+    if (!activePeer) {
+        messagesArea.innerHTML = '<div class="empty-state">Выберите собеседника для начала чата</div>';
+        return;
+    }
+    
+    if (!messages[activePeer.username] || messages[activePeer.username].length === 0) {
+        messagesArea.innerHTML = '<div class="empty-state">Нет сообщений. Начните диалог!</div>';
+        return;
+    }
 
     const msgs = messages[activePeer.username];
     
@@ -559,7 +612,11 @@ function deleteChat() {
     
     if (confirm(`Удалить чат с ${activePeer.username}?`)) {
         messages[activePeer.username] = [];
+        activePeer = null;
+        stopMessagePolling(); // Stop polling when chat is deleted
         renderMessages();
+        renderPeers(); // Update peers list to remove active state
+        updateHeader(); // Clear header
     }
 }
 
@@ -671,6 +728,24 @@ searchInput.addEventListener('input', (e) => {
 deleteChatBtn.addEventListener('click', deleteChat);
 attachBtn.addEventListener('click', () => {
     fileInput.click();
+});
+
+// Cleanup polling when page is unloaded
+window.addEventListener('beforeunload', () => {
+    stopMessagePolling();
+});
+
+// Cleanup polling when visibility changes (user switches tabs)
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        // Page is hidden, reduce polling frequency or stop
+        stopMessagePolling();
+    } else {
+        // Page is visible again, restart polling if we have an active peer
+        if (activePeer) {
+            startMessagePolling();
+        }
+    }
 });
 
 renderPeers();
