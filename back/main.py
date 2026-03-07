@@ -167,6 +167,20 @@ class SecureMessenger:
         ok = self.handshake.handle_complete(data)
         if ok:
             print(f"   ✅ Маппинг зарегистрирован (HANDSHAKE_COMPLETE)")
+            # Находим имя пира по IP
+            peer_name = None
+            for ip, info in self.discovery.get_all_peers().items():
+                if ip == addr[0]:
+                    peer_name = info['username']
+                    break
+            # Добавляем в активные чаты если еще нет
+            if peer_name and peer_name not in self.active_chats:
+                # Ищем chat_id из маппинга
+                for local_id, remote_id in self.crypto.chat_mappings.items():
+                    if remote_id == data.get('chat_id'):
+                        self.active_chats[peer_name] = local_id
+                        print(f"   ✅ Чат с {peer_name} активирован после HANDSHAKE_COMPLETE")
+                        break
         else:
             print(f"   ❌ Не удалось зарегистрировать маппинг")
 
@@ -225,26 +239,35 @@ class SecureMessenger:
             print(f"   ⚠️ Не удалось сохранить локальное уведомление о файле: {e}")
 
     def start_chat(self, peer_name: str) -> bool:
-        print(f"\n🔐 Начинаем чат с {peer_name}...")
         peer = self.discovery.get_peer_by_name(peer_name)
         if not peer:
             print(f"❌ Пир {peer_name} не найден")
             return False
         ip, info = peer
-        print(f"   IP: {ip}")
-        print(f"   Device ID: {info['device_id']}")
         handshake_msg = self.handshake.initiate(peer_name, ip, info['device_id'])
         if self.connection.send_to_peer(ip, handshake_msg):
             print(f"   ✅ Handshake отправлен")
-            return True
+            # Ждем ответа 1 секунду
+            time.sleep(1.0)
+            # Проверяем установился ли чат
+            if peer_name in self.active_chats:
+                print(f"   ✅ Чат с {peer_name} установлен")
+                return True
+            else:
+                print(f"   ⏳ Ожидаем ответа от {peer_name}...")
+                return False
         else:
             print(f"   ❌ {peer_name} не отвечает")
             return False
 
     def send_message(self, peer_name: str, text: str) -> bool:
         if peer_name not in self.active_chats:
-            print(f"❌ Нет активного чата с {peer_name}")
-            return False
+            print(f"[main] 🤝 No active chat with {peer_name}, initiating handshake")
+            if self.start_chat(peer_name):
+                print(f"[main] ✅ Handshake successful with {peer_name}")
+            else:
+                print(f"❌ Нет активного чата с {peer_name}")
+                return False
         local_chat_id = self.active_chats[peer_name]
         peer = self.discovery.get_peer_by_name(peer_name)
         if not peer:
