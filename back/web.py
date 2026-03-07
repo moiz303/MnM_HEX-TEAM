@@ -60,8 +60,19 @@ class UnixLocalAPIClient:
         return resp.get('result')
 
 
+# Global variables for messenger components
+messenger = None
+local_api = None
+remote_client = None
+
 def create_app():
+    global messenger, local_api, remote_client
+    
+    # Очищаем глобальные переменные при создании app
+    globals()['current_username'] = None
+    
     app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
+    CORS(app, origins="*")
     CORS(app)
     
     # Настройка логирования
@@ -70,7 +81,6 @@ def create_app():
 
     # Prefer connecting to an existing LocalAPI over UNIX socket (another process).
     # If that fails, start SecureMessenger in-process and expose a LocalAPI server.
-    local_api = None
     remote_client = None
     messenger = None
 
@@ -83,11 +93,7 @@ def create_app():
     except Exception:
         remote_client = None
 
-    # Global variable to store current username
-    current_username = None
-    
-    # Initialize current_username from environment or generate
-    import uuid
+    # Initialize current_username from environment or frontend
     import os
     
     username = os.getenv('MESSENGER_USERNAME')
@@ -95,23 +101,19 @@ def create_app():
         # Не генерируем случайное имя, ждем установки с фронта
         username = None
     
+    globals()['current_username'] = username
     if username:
-        globals()['current_username'] = username
         print(f'[web] Current username set to: {username}')
     else:
-        globals()['current_username'] = None
         print(f'[web] Waiting for username from frontend')
 
-    if not remote_client:
+    # Запускаем messenger только если есть имя
+    if not remote_client and username:
         try:
-            # Use the already initialized username (может быть None)
             messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
-            if username:
-                print(f'[web] Started in-process SecureMessenger as {username}')
-            else:
-                print(f'[web] Started in-process SecureMessenger, waiting for username')
+            print(f'[web] Started in-process SecureMessenger as {username}')
         except Exception as e:
             print(f"[web] Could not start SecureMessenger: {e}")
 
@@ -468,6 +470,15 @@ def create_app():
                         print(f'[web] Sent updated broadcast with username: {username}')
                     except Exception as e:
                         print(f'[web] Failed to send broadcast: {e}')
+        elif not messenger and not remote_client:
+            # Если messenger еще не запущен, запускаем его сейчас
+            try:
+                messenger = SecureMessenger(username)
+                local_api = LocalAPI(messenger)
+                threading.Thread(target=local_api.start, daemon=True).start()
+                print(f'[web] Started SecureMessenger after username set: {username}')
+            except Exception as e:
+                print(f"[web] Could not start SecureMessenger: {e}")
         
         return jsonify({
             'success': True, 
