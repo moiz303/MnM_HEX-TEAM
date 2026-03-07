@@ -117,11 +117,14 @@ class SecureCryptoCore:
             peer_id: идентификатор пира
             peer_ephemeral_bytes: байты эфемерного ключа пира (DER)
             peer_chat_id: chat_id пира (если известен, например при ответе на handshake)
+            my_ephemeral_private: эфемерный приватный ключ (если есть, для инициатора)
 
         Returns:
             local_chat_id: локальный идентификатор чата
             response_data: данные для ответа (публичный ключ и подпись)
         """
+        print(f"[crypto] 🔐 Creating secure session with peer_id: {peer_id}, peer_chat_id: {peer_chat_id}")
+        
         # Загружаем эфемерный ключ пира
         try:
             peer_ephemeral = serialization.load_der_public_key(peer_ephemeral_bytes)
@@ -186,10 +189,13 @@ class SecureCryptoCore:
         ).hexdigest()[:16]
 
         # Сохраняем сессию
+        print(f"[crypto] 💾 Saving session key: local_chat_id={local_chat_id}, peer_id={peer_id}")
         self._session_keys[local_chat_id] = SessionKeys(encrypt_key, mac_key, peer_id)
+        print(f"[crypto] ✅ Session saved. Total sessions: {len(self._session_keys)}")
 
         # Если известен chat_id пира, сохраняем маппинг
         if peer_chat_id:
+            print(f"[crypto] 🗺️ Saving mapping: {local_chat_id} <-> {peer_chat_id}")
             self._local_to_remote[local_chat_id] = peer_chat_id
             self._remote_to_local[peer_chat_id] = local_chat_id
             print(f"  📍 Маппинг: {local_chat_id[:8]} <-> {peer_chat_id[:8]}")
@@ -473,7 +479,28 @@ class SecureCryptoCore:
 
     def get_session_key(self, peer_id: str) -> Optional[bytes]:
         """Получить ключ сессии для peer_id (для файлов)"""
-        for session in self._session_keys.values():
+        print(f"[crypto] 🔍 Looking for session key for peer_id: {peer_id}")
+        print(f"[crypto] 🔍 Available session keys: {len(self._session_keys)}")
+        
+        # Сначала ищем по peer_id напрямую
+        for session_id, session in self._session_keys.items():
+            print(f"[crypto] 🔍 Session {session_id}: peer_id={session.peer_id}")
             if session.peer_id == peer_id:
+                print(f"[crypto] ✅ Found session key for {peer_id}")
                 return session.encrypt_key.read()
+        
+        # Если не нашли, ищем по маппингам
+        # Возможно peer_id это chat_id, попробуем найти по remote_to_local
+        local_chat_id = self._remote_to_local.get(peer_id)
+        if local_chat_id and local_chat_id in self._session_keys:
+            print(f"[crypto] ✅ Found session key for {peer_id} via mapping {local_chat_id}")
+            return self._session_keys[local_chat_id].encrypt_key.read()
+        
+        # Если peer_id это IP, попробуем найти сессию где peer_id содержит этот IP
+        for session_id, session in self._session_keys.items():
+            if peer_id in session.peer_id or session.peer_id in peer_id:
+                print(f"[crypto] ✅ Found session key for {peer_id} via partial match with {session.peer_id}")
+                return session.encrypt_key.read()
+        
+        print(f"[crypto] ❌ No session key found for {peer_id}")
         return None

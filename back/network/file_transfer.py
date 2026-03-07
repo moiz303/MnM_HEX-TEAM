@@ -300,6 +300,7 @@ class FileTransferManager:
     def _send_chunk_with_ack(self, session: TransferSession, chunk: ChunkInfo) -> bool:
         """Send encrypted chunk with ACK confirmation."""
         import base64
+        print(f"[file_transfer] 🔍 Looking for session key for receiver_id: {session.file_info.receiver_id}")
         session_key = self.crypto.get_session_key(session.file_info.receiver_id)
         
         # Encryption is mandatory
@@ -511,7 +512,10 @@ class FileTransferManager:
         in_response_to = data.get('in_response_to')
         status = data.get('status')
         
+        print(f"[file_transfer] 📥 Received ACK from {sender_id}: in_response_to={in_response_to}, status={status}")
+        
         if status != 'delivered':
+            print(f"[file_transfer] ❌ ACK status not 'delivered': {status}")
             return
             
         print(f"[file_transfer] 📥 Delivery receipt for message {in_response_to} from {sender_id}")
@@ -520,8 +524,10 @@ class FileTransferManager:
         with self.transfer_lock:
             for transfer_id, session in self.active_transfers.items():
                 if session.direction == 'upload':
+                    print(f"[file_transfer] 🔍 Checking transfer {transfer_id} for ACK match")
                     # Check each chunk to find the one with matching msg_id
                     for chunk_index, chunk in session.chunks.items():
+                        print(f"[file_transfer] 🔍 Checking chunk {chunk_index}: msg_id={getattr(chunk, 'msg_id', 'None')}")
                         if hasattr(chunk, 'msg_id') and chunk.msg_id == in_response_to:
                             if chunk_index not in session.completed_chunks:
                                 print(f"[file_transfer] ✅ ACK received for chunk {chunk_index} of transfer {transfer_id}")
@@ -532,6 +538,7 @@ class FileTransferManager:
                                 # Signal ACK for this chunk
                                 ack_key = f"{transfer_id}:{chunk_index}"
                                 if ack_key in self.pending_acks:
+                                    print(f"[file_transfer] ✅ Signaling ACK event for {ack_key}")
                                     self.pending_acks[ack_key].set()
                                     del self.pending_acks[ack_key]
                                 
@@ -539,7 +546,10 @@ class FileTransferManager:
                                 if len(session.completed_chunks) >= session.file_info.chunk_count:
                                     self._finalize_transfer(session, success=True)
                                 return
+                            else:
+                                print(f"[file_transfer] ⚠️ ACK for already completed chunk {chunk_index}")
                             break  # Found matching chunk, no need to check others
+            print(f"[file_transfer] ❌ No matching chunk found for ACK {in_response_to}")
 
     def handle_file_chunk(self, data: dict, sender_id: str):
         """Обработка входящего чанка с улучшенной валидацией"""
@@ -647,14 +657,17 @@ class FileTransferManager:
             
     def _send_chunk_ack(self, transfer_id: str, chunk_index: int, sender_id: str, msg_id: str):
         """Отправка ACK для чанка"""
+        print(f"[file_transfer] 📤 Sending ACK for chunk {chunk_index} of transfer {transfer_id} to {sender_id}")
         ack_msg = create_message(
             MessageType.DELIVERY_RECEIPT,
             chat_id=sender_id,  # Use sender_id directly (this is the IP for routing)
             in_response_to=msg_id,
             status='delivered'
         )
+        print(f"[file_transfer] 📨 ACK message: {ack_msg}")
         # Use the original IP address for routing, not the device_id
-        self.conn_mgr.send_to_peer(sender_id, ack_msg)
+        success = self.conn_mgr.send_to_peer(sender_id, ack_msg)
+        print(f"[file_transfer] 📤 ACK send result: {success}")
         
         # Signal ACK for this chunk
         ack_key = f"{transfer_id}:{chunk_index}"

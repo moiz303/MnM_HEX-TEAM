@@ -119,6 +119,59 @@ def create_app():
                 return False
 
             def send_file(self, peer_name, file_path):
+                print(f"[web] MockBackend.send_file called: peer={peer_name}, file={file_path}")
+                # Для web_user создаем тестовый session key
+                if peer_name == 'web_user':
+                    print(f"[web] 🌐 Creating test session for web_user")
+                    try:
+                        # Импортируем необходимые модули
+                        import sys
+                        import os
+                        sys.path.insert(0, os.path.dirname(__file__))
+                        
+                        from network.file_transfer import FileTransferManager
+                        from core.crypto import CryptoManager
+                        from network.connection import ConnectionManager
+                        
+                        # Создаем компоненты
+                        crypto = CryptoManager('web_user_device')
+                        conn_mgr = ConnectionManager(crypto)
+                        file_manager = FileTransferManager(crypto, conn_mgr)
+                        
+                        # Создаем тестовый session key
+                        device_id = '755c8d6420eadda1'
+                        print(f"[web] 🔐 Creating test session key for {device_id}")
+                        
+                        # Создаем фиктивный session key
+                        import secrets
+                        from nacl.secret import SecretBox
+                        session_key = secrets.token_bytes(32)
+                        
+                        # Сохраняем в crypto напрямую
+                        from core.crypto import SessionKeys
+                        local_chat_id = 'test_session_123'
+                        crypto._session_keys[local_chat_id] = SessionKeys(
+                            encrypt_key=SecretBox(session_key),
+                            mac_key=SecretBox(secrets.token_bytes(32)),
+                            peer_id=device_id
+                        )
+                        
+                        print(f"[web] ✅ Test session key created. Total sessions: {len(crypto._session_keys)}")
+                        
+                        # Используем те же параметры что и в реальном бэкенде
+                        ip = '192.168.0.231'
+                        
+                        print(f"[web] 🔄 Calling real file transfer")
+                        transfer_id = file_manager.send_file(ip, file_path, device_id)
+                        print(f"[web] ✅ Transfer initiated: {transfer_id}")
+                        return transfer_id
+                        
+                    except Exception as e:
+                        print(f"[web] ❌ File transfer failed: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        raise ValueError(f"File transfer failed: {e}")
+                
                 return 'mock-transfer-id'
 
             def get_conversation(self, chat_id, limit=50):
