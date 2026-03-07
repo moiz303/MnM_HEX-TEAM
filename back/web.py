@@ -66,14 +66,21 @@ def create_app():
 
     if not remote_client:
         try:
-            # Generate unique username for web instance
+            # Get username from environment variable or generate unique one
             import uuid
-            web_user_id = str(uuid.uuid4())[:8]
-            username = f'web_user_{web_user_id}'
+            import os
+            
+            # Try to get username from environment variable
+            username = os.getenv('MESSENGER_USERNAME')
+            if not username:
+                # Fallback to unique web user name
+                web_user_id = str(uuid.uuid4())[:8]
+                username = f'web_user_{web_user_id}'
+            
             messenger = SecureMessenger(username)
             local_api = LocalAPI(messenger)
             threading.Thread(target=local_api.start, daemon=True).start()
-            print('[web] Started in-process SecureMessenger')
+            print(f'[web] Started in-process SecureMessenger as {username}')
         except Exception as e:
             print(f"[web] Could not start SecureMessenger: {e}")
 
@@ -194,10 +201,8 @@ def create_app():
                     
                     if only_incoming:
                         msgs_raw = messenger.get_incoming_messages(chat_id, limit)
-                        print(f"🔍 DEBUG: Получено {len(msgs_raw)} входящих сообщений для chat_id={chat_id}")
                     else:
                         msgs_raw = messenger.get_conversation(chat_id, limit)
-                        print(f"🔍 DEBUG: Получено {len(msgs_raw)} всех сообщений для chat_id={chat_id}")
                     
                     # Обрабатываем сообщения как в api.py
                     result = []
@@ -224,7 +229,6 @@ def create_app():
                             'timestamp': timestamp,
                             'status': 'delivered' if delivered else 'sent'
                         })
-                        print(f"🔍 DEBUG: Обработано сообщение от={sender}, text={text[:20]}, from_field={'me' if sender == messenger.username else sender}")
                     return {'messages': result, 'total': len(result), 'count': len(result)}, 200
 
                 if name == 'get_my_info':
