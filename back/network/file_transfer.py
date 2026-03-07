@@ -401,7 +401,7 @@ class FileTransferManager:
         chunk.sent_at = time.time()
 
         # Wait for ACK
-        ack_received = self._wait_for_ack(session.transfer_id, chunk.chunk_index, timeout=10.0)
+        ack_received = self._wait_for_ack(session.transfer_id, chunk.chunk_index, timeout=0.5)
         if ack_received:
             with self.transfer_lock:
                 if chunk.chunk_index not in session.completed_chunks:
