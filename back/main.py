@@ -382,6 +382,33 @@ class SecureMessenger:
         print(f"   Известных пиров: {len(self.discovery.get_all_peers())}")
         print("-" * 60)
 
+    def get_my_info(self):
+        """Получить информацию о себе для API"""
+        return {
+            'username': self.username,
+            'device_id': self.device_id,
+            'ip': '127.0.0.1',
+            'port': 37021,
+            'status': 'online',
+            'uptime': time.time() - self.start_time,
+            'active_chats': len(self.active_chats)
+        }
+
+    def get_all_peers(self):
+        """Получить всех пиров для API"""
+        return self.discovery.get_all_peers()
+
+    def get_peer_by_name(self, name):
+        """Найти пира по имени для API"""
+        return self.discovery.get_peer_by_name(name)
+
+    def get_conversation(self, chat_id, limit=50):
+        """Получить историю сообщений для API"""
+        try:
+            return self.db.get_conversation(chat_id, limit)
+        except:
+            return []
+
     def cleanup(self):
         """Очистка ресурсов"""
         print("\n🧹 Очистка ресурсов...")

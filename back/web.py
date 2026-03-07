@@ -114,20 +114,8 @@ def create_app():
             abort(404)
         return send_from_directory(FRONTEND_DIR, filename)
 
-    # call_handler supports three modes: local_api (in-process), remote_client (unix socket), messenger (mock/wrapper)
     def call_handler(name, params):
         params = params or {}
-
-        # Helper to attempt start_chat then retry send
-        def _try_send_with_handshake(call_fn, peer, params):
-            try:
-                return call_fn(name, params)
-            except Exception:
-                try:
-                    call_fn('start_chat', {'username': peer})
-                except Exception:
-                    pass
-                return call_fn(name, params)
 
         # In-process LocalAPI: call handler functions directly
         if local_api:
@@ -135,18 +123,6 @@ def create_app():
             if not handler:
                 return {'error': f'method {name} not found'}, 404
             try:
-                if name == 'send_message':
-                    try:
-                        result = handler(params)
-                        return result, 200
-                    except Exception:
-                        # attempt handshake then retry
-                        try:
-                            local_api.methods.get('start_chat')({'username': params.get('peer')})
-                        except Exception:
-                            pass
-                        result = handler(params)
-                        return result, 200
                 result = handler(params)
                 return result, 200
             except Exception as e:
@@ -155,19 +131,6 @@ def create_app():
         # Remote LocalAPI over unix socket
         if remote_client:
             try:
-                if name == 'send_message':
-                    # first try, then attempt start_chat and retry
-                    try:
-                        res = remote_client.call(name, params)
-                        return res, 200
-                    except Exception:
-                        try:
-                            remote_client.call('start_chat', {'username': params.get('peer')})
-                        except Exception:
-                            pass
-                        res = remote_client.call(name, params)
-                        return res, 200
-
                 res = remote_client.call(name, params)
                 return res, 200
             except Exception as e:

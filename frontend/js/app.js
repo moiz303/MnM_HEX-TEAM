@@ -1,33 +1,5 @@
-// Active peers (populated from backend /api/peers). Keep mock fallback if API unavailable.
+// Active peers (populated from backend /api/peers)
 let peers = [];
-
-const mockPeers = [
-    { id: 1, ip: '192.168.1.102', username: '192.168.1.102', ping: 12, online: true },
-    { id: 2, ip: '192.168.1.105', username: '192.168.1.105', ping: 8, online: true },
-    { id: 3, ip: '192.168.1.110', username: '192.168.1.110', ping: 25, online: false },
-    { id: 4, ip: '192.168.1.115', username: '192.168.1.115', ping: 15, online: true },
-    { id: 5, ip: '192.168.1.120', username: '192.168.1.120', ping: 30, online: true },
-    { id: 6, ip: '192.168.1.125', username: '192.168.1.125', ping: 18, online: false },
-    { id: 7, ip: '192.168.1.130', username: '192.168.1.130', ping: 22, online: true }
-];
-
-const randomResponses = [
-    'Окей',
-    'Понял',
-    'Хорошо',
-    'Сделано',
-    'Ясно',
-    'Договорились',
-    'Без проблем',
-    'Согласен',
-    'Отлично!',
-    'Супер',
-    'Есть',
-    'Принято',
-    'Конечно',
-    'Все понятно',
-    'Буду делать'
-];
 
 let activePeer = null;
 let messages = {};
@@ -105,8 +77,8 @@ async function fetchPeersPolling() {
             has_chat: p.has_chat || false
         }));
     } catch (err) {
-        // fallback to mock if API unavailable
-        peers = mockPeers;
+        console.warn('Failed to fetch peers:', err);
+        peers = [];
     }
 
     renderPeers(searchInput.value);
@@ -366,22 +338,13 @@ function sendMessage() {
             filePreview.innerHTML = '';
         })();
     }
-
-    // Simulate reply only if using mock backend
-    if (peers === mockPeers) {
-        setTimeout(() => {
-            const randomResponse = randomResponses[Math.floor(Math.random() * randomResponses.length)];
-            messages[activePeer.username].push({ text: randomResponse, time: new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), sent: false });
-            renderMessages();
-        }, 500 + Math.random() * 1500);
-    }
 }
 
 function deleteChat() {
     if (!activePeer) return;
     
     if (confirm(`Удалить чат с ${activePeer.ip}?`)) {
-        messages[activePeer.id] = [];
+        messages[activePeer.username] = [];
         renderMessages();
     }
 }

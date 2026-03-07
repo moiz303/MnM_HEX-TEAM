@@ -50,6 +50,9 @@ class LocalAPI:
 
             # Своя информация
             'get_my_info': self._handle_get_my_info,
+            
+            # Управление ключами
+            'rotate_keys': self._handle_rotate_keys,
         }
 
         # ID запросов и их обработчики
