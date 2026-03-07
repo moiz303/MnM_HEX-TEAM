@@ -1026,26 +1026,55 @@ class FileTransferManager:
         """Валидация пути к файлу"""
         try:
             path = Path(file_path)
+            print(f"[file_transfer] 🔍 Validating path: {file_path}")
             
             # Проверка на path traversal
             if '..' in path.parts:
+                print(f"[file_transfer] ❌ Path traversal detected: {file_path}")
                 return False
             
             # Разрешаем абсолютные пути если они в разрешенных директориях
             if str(path).startswith('/'):
-                # Проверяем что путь в разрешенной директории (downloads/uploads)
-                allowed_dirs = ['/downloads/', '/uploads/', './downloads/', './uploads/']
-                if not any(str(path).startswith(allowed_dir) for allowed_dir in allowed_dirs):
+                # Получаем базовую директорию проекта
+                import os
+                base_dir = os.path.abspath(os.path.dirname(__file__) + '/../..')
+                base_dir = base_dir.replace('\\', '/')  # Normalize for cross-platform
+                print(f"[file_transfer] 📁 Base directory: {base_dir}")
+                
+                # Разрешенные директории (относительные и абсолютные)
+                allowed_dirs = [
+                    '/downloads/', 
+                    '/uploads/', 
+                    './downloads/', 
+                    './uploads/',
+                    f'{base_dir}/downloads/',
+                    f'{base_dir}/uploads/',
+                    f'{base_dir}/downloads/uploads/',
+                ]
+                
+                print(f"[file_transfer] 🔍 Checking if path starts with any allowed dir...")
+                for allowed_dir in allowed_dirs:
+                    if str(path).startswith(allowed_dir):
+                        print(f"[file_transfer] ✅ Path matches allowed dir: {allowed_dir}")
+                        break
+                else:
+                    print(f"[file_transfer] ❌ Path not in allowed dirs: {path}")
+                    print(f"[file_transfer] ❌ Allowed dirs: {allowed_dirs}")
                     return False
             elif str(path).startswith('./'):
                 # Относительные пути должны начинаться с downloads/ или uploads/
                 if not (str(path).startswith('./downloads/') or str(path).startswith('./uploads/')):
+                    print(f"[file_transfer] ❌ Relative path not in allowed dirs: {file_path}")
                     return False
             
             # Проверка размера
-            if path.stat().st_size > Limits.MAX_FILE_SIZE:
+            file_size = path.stat().st_size
+            if file_size > Limits.MAX_FILE_SIZE:
+                print(f"[file_transfer] ❌ File too large: {file_size} > {Limits.MAX_FILE_SIZE}")
                 return False
             
+            print(f"[file_transfer] ✅ File validation passed: {file_path} ({file_size} bytes)")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[file_transfer] ❌ Validation error: {e}")
             return False
