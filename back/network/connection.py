@@ -54,7 +54,18 @@ class ConnectionManager:
     def _handle_connection(self, sock: socket.socket, addr: tuple):
         """Обработка одного соединения"""
         try:
-            data = sock.recv(Limits.MAX_MESSAGE_SIZE)
+            # Read all available data in chunks
+            data = b''
+            sock.settimeout(2.0)  # 2 second timeout for receiving complete message
+            try:
+                while True:
+                    chunk = sock.recv(8192)  # Read in 8KB chunks
+                    if not chunk:
+                        break
+                    data += chunk
+            except socket.timeout:
+                pass  # Expected when all data received
+            
             if not data:
                 return
 

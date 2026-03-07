@@ -223,14 +223,18 @@ class FileTransferManager:
 
         import json
         msg_size = len(json.dumps(msg).encode())
-        print(f"[file_transfer] chunk {chunk.chunk_index} message size: {msg_size} bytes")
+        print(f"[file_transfer] chunk {chunk.chunk_index} message size: {msg_size} bytes, hash={chunk.chunk_hash[:8]}...")
         if msg_size > 64000:
             print(f"[file_transfer] ⚠️ WARNING: chunk {chunk.chunk_index} message exceeds 64KB threshold!")
 
         # use target_ip stored in session (should be the peer's IP)
         dest = session.target_ip or session.file_info.receiver_id
         print(f"[file_transfer] sending chunk {chunk.chunk_index} to {dest}")
-        self._send_to_peer(dest, msg, session.circuit_id)
+        success = self._send_to_peer(dest, msg, session.circuit_id)
+        if not success:
+            print(f"[file_transfer] ⚠️  Failed to send chunk {chunk.chunk_index} to {dest}")
+        else:
+            print(f"[file_transfer] ✅ Chunk {chunk.chunk_index} sent successfully")
         chunk.sent_at = time.time()
 
         ack_event = threading.Event()
@@ -247,19 +251,22 @@ class FileTransferManager:
             if ack_key in self.pending_acks:
                 del self.pending_acks[ack_key]
 
-    def _send_to_peer(self, peer_ip: str, msg: dict, circuit_id: Optional[str] = None):
+    def _send_to_peer(self, peer_ip: str, msg: dict, circuit_id: Optional[str] = None) -> bool:
         """Send a message to a peer IP (ignores device_id confusion).
         Circuit_id is currently only used for relaying; router logic is minimal.
+        Returns True if sent successfully, False otherwise.
         """
         if circuit_id and self.router:
             # forward through relay network if a circuit exists
             try:
                 self.router.relay_manager.handle_relay_data(circuit_id, msg, 'local')
+                return True
             except Exception as e:
-                print(f"Relay send error: {e}")
+                print(f"[file_transfer] Relay send error: {e}")
+                return False
         else:
             # always send directly by IP
-            self.conn_mgr.send_to_peer(peer_ip, msg)
+            return self.conn_mgr.send_to_peer(peer_ip, msg)
 
     def handle_file_offer(self, data: dict, sender_id: str):
         """Обработка предложения файла"""
@@ -355,11 +362,14 @@ class FileTransferManager:
                 return
 
             actual_hash = hashlib.sha256(decrypted_data).hexdigest()
-            if actual_hash != chunk_hash:
+            expected_hash = chunk_hash
+            print(f"[file_transfer] chunk {chunk_index} hash check: expected={expected_hash[:8]}..., got={actual_hash[:8]}...")
+            if actual_hash != expected_hash:
                 print(f"[file_transfer] ❌ Chunk hash mismatch: {chunk_index}")
-                print(f"               Expected: {chunk_hash}")
+                print(f"               Expected: {expected_hash}")
                 print(f"               Got:      {actual_hash}")
                 print(f"               Data size: {len(decrypted_data)}")
+                print(f"               First 100 bytes (hex): {decrypted_data[:100].hex()}")
                 return
 
             self._write_chunk(session.local_path, chunk_index, decrypted_data)

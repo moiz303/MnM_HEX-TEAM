@@ -79,7 +79,10 @@ class SecureMessenger:
 
     def _on_message(self, data: dict, addr: tuple):
         msg_type = data.get('type')
-        print(f"[main] _on_message called: type={msg_type}, addr={addr[0]}")
+        print(f"[main] _on_message called: type={msg_type}, addr={addr[0]}, msg_keys={list(data.keys())}")
+        if msg_type == 'file_chunk':
+            chunk_data_size = len(data.get('data', ''))
+            print(f"[main] FILE_CHUNK data field size: {chunk_data_size} chars")
         try:
             if msg_type == MessageType.HANDSHAKE_INIT:
                 print(f"\n📥 Получен handshake INIT от {addr[0]}")
